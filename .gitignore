@@ -1,4 +1,5 @@
 /target
 /.idea
 /docs/plans
+/docs/book/book
 docker-compose.yml

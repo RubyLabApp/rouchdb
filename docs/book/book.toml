@@ -1,0 +1,14 @@
+[book]
+title = "RouchDB"
+description = "A local-first document database with CouchDB replication protocol support"
+authors = ["RouchDB Contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/rouchdb/rouchdb"
