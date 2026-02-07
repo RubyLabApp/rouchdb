@@ -277,7 +277,7 @@ pub struct AllDocsResponse {
 pub struct DbInfo {
     pub db_name: String,
     pub doc_count: u64,
-    pub update_seq: u64,
+    pub update_seq: Seq,
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ pub struct DbInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct ChangesOptions {
-    pub since: u64,
+    pub since: Seq,
     pub limit: Option<u64>,
     pub descending: bool,
     pub include_docs: bool,
@@ -296,7 +296,7 @@ pub struct ChangesOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangeEvent {
-    pub seq: u64,
+    pub seq: Seq,
     pub id: String,
     pub changes: Vec<ChangeRev>,
     #[serde(default)]
@@ -313,7 +313,7 @@ pub struct ChangeRev {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangesResponse {
     pub results: Vec<ChangeEvent>,
-    pub last_seq: u64,
+    pub last_seq: Seq,
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +362,70 @@ pub struct RevsDiffResult {
     pub missing: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub possible_ancestors: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Sequence type — supports both numeric (local) and opaque string (CouchDB)
+// ---------------------------------------------------------------------------
+
+/// A database sequence identifier.
+///
+/// Local adapters use numeric sequences (0, 1, 2, ...).
+/// CouchDB 3.x uses opaque string sequences that must be passed back as-is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Seq {
+    Num(u64),
+    Str(String),
+}
+
+impl Seq {
+    /// The zero sequence (start from the beginning).
+    pub fn zero() -> Self {
+        Seq::Num(0)
+    }
+
+    /// Extract the numeric value. For opaque strings, parses the numeric
+    /// prefix (e.g., `"13-abc..."` → `13`). Returns 0 if unparseable.
+    pub fn as_num(&self) -> u64 {
+        match self {
+            Seq::Num(n) => *n,
+            Seq::Str(s) => s
+                .split('-')
+                .next()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0),
+        }
+    }
+
+    /// Format for use in HTTP query parameters.
+    pub fn to_query_string(&self) -> String {
+        match self {
+            Seq::Num(n) => n.to_string(),
+            Seq::Str(s) => s.clone(),
+        }
+    }
+}
+
+impl Default for Seq {
+    fn default() -> Self {
+        Seq::Num(0)
+    }
+}
+
+impl From<u64> for Seq {
+    fn from(n: u64) -> Self {
+        Seq::Num(n)
+    }
+}
+
+impl std::fmt::Display for Seq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Seq::Num(n) => write!(f, "{}", n),
+            Seq::Str(s) => write!(f, "{}", s),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

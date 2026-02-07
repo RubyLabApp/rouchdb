@@ -196,14 +196,17 @@ impl HttpAdapter {
 }
 
 /// Parse a CouchDB sequence value (can be integer or string).
-fn parse_seq(v: &serde_json::Value) -> u64 {
-    match v {
-        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0),
+fn parse_seq(value: &serde_json::Value) -> Seq {
+    match value {
+        serde_json::Value::Number(n) => Seq::Num(n.as_u64().unwrap_or(0)),
         serde_json::Value::String(s) => {
-            // CouchDB 2.x+ uses strings like "42-g1..."
-            s.split('-').next().and_then(|p| p.parse().ok()).unwrap_or(0)
+            if let Ok(n) = s.parse::<u64>() {
+                Seq::Num(n)
+            } else {
+                Seq::Str(s.clone())
+            }
         }
-        _ => 0,
+        _ => Seq::Num(0),
     }
 }
 
@@ -346,7 +349,7 @@ impl Adapter for HttpAdapter {
     }
 
     async fn changes(&self, opts: ChangesOptions) -> Result<ChangesResponse> {
-        let mut params = vec![format!("since={}", opts.since)];
+        let mut params = vec![format!("since={}", opts.since.to_query_string())];
         if opts.include_docs {
             params.push("include_docs=true".into());
         }

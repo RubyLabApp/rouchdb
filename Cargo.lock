@@ -828,6 +828,7 @@ dependencies = [
 name = "rouchdb"
 version = "0.1.0"
 dependencies = [
+ "reqwest",
  "rouchdb-adapter-http",
  "rouchdb-adapter-memory",
  "rouchdb-adapter-redb",
@@ -836,7 +837,9 @@ dependencies = [
  "rouchdb-query",
  "rouchdb-replication",
  "serde_json",
+ "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

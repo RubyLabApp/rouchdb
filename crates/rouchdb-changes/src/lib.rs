@@ -12,13 +12,13 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use rouchdb_core::adapter::Adapter;
-use rouchdb_core::document::{ChangeEvent, ChangesOptions};
+use rouchdb_core::document::{ChangeEvent, ChangesOptions, Seq};
 use rouchdb_core::error::Result;
 
 /// A notification that a change occurred, sent through the broadcast channel.
 #[derive(Debug, Clone)]
 pub struct ChangeNotification {
-    pub seq: u64,
+    pub seq: Seq,
     pub doc_id: String,
 }
 
@@ -35,7 +35,7 @@ impl ChangeSender {
         (ChangeSender { tx }, ChangeReceiver { rx })
     }
 
-    pub fn notify(&self, seq: u64, doc_id: String) {
+    pub fn notify(&self, seq: Seq, doc_id: String) {
         // Ignore send errors (no receivers)
         let _ = self.tx.send(ChangeNotification { seq, doc_id });
     }
@@ -70,7 +70,7 @@ impl ChangeReceiver {
 /// Configuration for a changes stream.
 #[derive(Debug, Clone)]
 pub struct ChangesStreamOptions {
-    pub since: u64,
+    pub since: Seq,
     pub live: bool,
     pub include_docs: bool,
     pub doc_ids: Option<Vec<String>>,
@@ -82,7 +82,7 @@ pub struct ChangesStreamOptions {
 impl Default for ChangesStreamOptions {
     fn default() -> Self {
         Self {
-            since: 0,
+            since: Seq::default(),
             live: false,
             include_docs: false,
             doc_ids: None,
@@ -118,7 +118,7 @@ pub struct LiveChangesStream {
     adapter: Arc<dyn Adapter>,
     receiver: Option<ChangeReceiver>,
     opts: ChangesStreamOptions,
-    last_seq: u64,
+    last_seq: Seq,
     buffer: Vec<ChangeEvent>,
     buffer_idx: usize,
     state: LiveStreamState,
@@ -142,7 +142,7 @@ impl LiveChangesStream {
         receiver: Option<ChangeReceiver>,
         opts: ChangesStreamOptions,
     ) -> Self {
-        let last_seq = opts.since;
+        let last_seq = opts.since.clone();
         Self {
             adapter,
             receiver,
@@ -158,7 +158,7 @@ impl LiveChangesStream {
     /// Fetch changes since `last_seq` and buffer them.
     async fn fetch_changes(&mut self) -> Result<()> {
         let changes_opts = ChangesOptions {
-            since: self.last_seq,
+            since: self.last_seq.clone(),
             limit: self.opts.limit.map(|l| l.saturating_sub(self.count)),
             descending: false,
             include_docs: self.opts.include_docs,
@@ -303,7 +303,7 @@ mod tests {
         let events = get_changes(
             db.as_ref(),
             ChangesStreamOptions {
-                since: 2,
+                since: Seq::Num(2),
                 ..Default::default()
             },
         )
@@ -361,10 +361,10 @@ mod tests {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
             put_doc(db_clone.as_ref(), "new1", serde_json::json!({})).await;
-            sender_clone.notify(2, "new1".into());
+            sender_clone.notify(Seq::Num(2), "new1".into());
             tokio::time::sleep(Duration::from_millis(50)).await;
             put_doc(db_clone.as_ref(), "new2", serde_json::json!({})).await;
-            sender_clone.notify(3, "new2".into());
+            sender_clone.notify(Seq::Num(3), "new2".into());
         });
 
         let event = stream.next_change().await.unwrap();
@@ -382,10 +382,10 @@ mod tests {
         let (sender, _rx) = ChangeSender::new(16);
         let mut sub = sender.subscribe();
 
-        sender.notify(1, "doc1".into());
+        sender.notify(Seq::Num(1), "doc1".into());
 
         let notification = sub.recv().await.unwrap();
-        assert_eq!(notification.seq, 1);
+        assert_eq!(notification.seq, Seq::Num(1));
         assert_eq!(notification.doc_id, "doc1");
     }
 }

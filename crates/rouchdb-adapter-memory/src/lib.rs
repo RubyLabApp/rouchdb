@@ -128,7 +128,7 @@ impl Adapter for MemoryAdapter {
         Ok(DbInfo {
             db_name: inner.name.clone(),
             doc_count,
-            update_seq: inner.update_seq,
+            update_seq: Seq::Num(inner.update_seq),
         })
     }
 
@@ -333,7 +333,7 @@ impl Adapter for MemoryAdapter {
         let mut results = Vec::new();
 
         // Iterate changes after `since`
-        let range = (opts.since + 1)..;
+        let range = (opts.since.as_num() + 1)..;
         let iter: Box<dyn Iterator<Item = (&u64, &(String, bool))>> = if opts.descending {
             Box::new(
                 inner
@@ -387,7 +387,7 @@ impl Adapter for MemoryAdapter {
             };
 
             results.push(ChangeEvent {
-                seq: *seq,
+                seq: Seq::Num(*seq),
                 id: doc_id.clone(),
                 changes: vec![ChangeRev {
                     rev: rev_str,
@@ -403,7 +403,7 @@ impl Adapter for MemoryAdapter {
             }
         }
 
-        let last_seq = results.last().map(|r| r.seq).unwrap_or(opts.since);
+        let last_seq = results.last().map(|r| r.seq.clone()).unwrap_or(opts.since.clone());
 
         Ok(ChangesResponse {
             results,
@@ -957,7 +957,7 @@ mod tests {
         let info = db.info().await.unwrap();
         assert_eq!(info.db_name, "test");
         assert_eq!(info.doc_count, 0);
-        assert_eq!(info.update_seq, 0);
+        assert_eq!(info.update_seq, Seq::Num(0));
     }
 
     #[tokio::test]
@@ -1142,12 +1142,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(changes.results.len(), 3);
-        assert_eq!(changes.last_seq, 3);
+        assert_eq!(changes.last_seq, Seq::Num(3));
 
         // Changes since seq 2
         let changes = db
             .changes(ChangesOptions {
-                since: 2,
+                since: Seq::Num(2),
                 ..Default::default()
             })
             .await
@@ -1262,7 +1262,7 @@ mod tests {
 
         let info = db.info().await.unwrap();
         assert_eq!(info.doc_count, 0);
-        assert_eq!(info.update_seq, 0);
+        assert_eq!(info.update_seq, Seq::Num(0));
     }
 
     #[tokio::test]

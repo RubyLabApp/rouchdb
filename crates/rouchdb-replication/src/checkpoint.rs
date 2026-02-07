@@ -2,12 +2,13 @@ use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
 use rouchdb_core::adapter::Adapter;
+use rouchdb_core::document::Seq;
 use rouchdb_core::error::Result;
 
 /// A checkpoint document stored as `_local/{replication_id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckpointDoc {
-    pub last_seq: u64,
+    pub last_seq: Seq,
     pub session_id: String,
     pub version: u32,
     pub replicator: String,
@@ -16,7 +17,7 @@ pub struct CheckpointDoc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckpointHistory {
-    pub last_seq: u64,
+    pub last_seq: Seq,
     pub session_id: String,
 }
 
@@ -47,13 +48,13 @@ impl Checkpointer {
         &self,
         source: &dyn Adapter,
         target: &dyn Adapter,
-    ) -> Result<u64> {
+    ) -> Result<Seq> {
         let source_cp = self.read_from(source).await;
         let target_cp = self.read_from(target).await;
 
         match (source_cp, target_cp) {
             (Ok(s), Ok(t)) => Ok(compare_checkpoints(&s, &t)),
-            _ => Ok(0), // No checkpoint found, start from beginning
+            _ => Ok(Seq::zero()), // No checkpoint found, start from beginning
         }
     }
 
@@ -62,7 +63,7 @@ impl Checkpointer {
         &self,
         source: &dyn Adapter,
         target: &dyn Adapter,
-        last_seq: u64,
+        last_seq: Seq,
     ) -> Result<()> {
         let doc = self.build_checkpoint_doc(last_seq);
         let json = serde_json::to_value(&doc)?;
@@ -84,9 +85,9 @@ impl Checkpointer {
         Ok(doc)
     }
 
-    fn build_checkpoint_doc(&self, last_seq: u64) -> CheckpointDoc {
+    fn build_checkpoint_doc(&self, last_seq: Seq) -> CheckpointDoc {
         CheckpointDoc {
-            last_seq,
+            last_seq: last_seq.clone(),
             session_id: self.session_id.clone(),
             version: 1,
             replicator: "rouchdb".into(),
@@ -109,23 +110,34 @@ fn generate_replication_id(source_id: &str, target_id: &str) -> String {
 }
 
 /// Compare source and target checkpoints to find the last common sequence.
-fn compare_checkpoints(source: &CheckpointDoc, target: &CheckpointDoc) -> u64 {
+///
+/// Returns the original `Seq` value (preserving opaque strings from CouchDB)
+/// rather than converting to numeric, so it can be passed back as `since`.
+fn compare_checkpoints(source: &CheckpointDoc, target: &CheckpointDoc) -> Seq {
     // If sessions match, use the sequence directly
     if source.session_id == target.session_id {
-        return std::cmp::min(source.last_seq, target.last_seq);
+        return if source.last_seq.as_num() <= target.last_seq.as_num() {
+            source.last_seq.clone()
+        } else {
+            target.last_seq.clone()
+        };
     }
 
     // Walk through histories to find a common session
     for sh in &source.history {
         for th in &target.history {
             if sh.session_id == th.session_id {
-                return std::cmp::min(sh.last_seq, th.last_seq);
+                return if sh.last_seq.as_num() <= th.last_seq.as_num() {
+                    sh.last_seq.clone()
+                } else {
+                    th.last_seq.clone()
+                };
             }
         }
     }
 
     // No common point found, start from beginning
-    0
+    Seq::zero()
 }
 
 #[cfg(test)]
@@ -145,57 +157,57 @@ mod tests {
     #[test]
     fn compare_same_session() {
         let cp = CheckpointDoc {
-            last_seq: 42,
+            last_seq: Seq::Num(42),
             session_id: "sess1".into(),
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![],
         };
-        assert_eq!(compare_checkpoints(&cp, &cp), 42);
+        assert_eq!(compare_checkpoints(&cp, &cp).as_num(), 42);
     }
 
     #[test]
     fn compare_different_session_with_history() {
         let source = CheckpointDoc {
-            last_seq: 50,
+            last_seq: Seq::Num(50),
             session_id: "sess2".into(),
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![
-                CheckpointHistory { last_seq: 50, session_id: "sess2".into() },
-                CheckpointHistory { last_seq: 30, session_id: "sess1".into() },
+                CheckpointHistory { last_seq: Seq::Num(50), session_id: "sess2".into() },
+                CheckpointHistory { last_seq: Seq::Num(30), session_id: "sess1".into() },
             ],
         };
         let target = CheckpointDoc {
-            last_seq: 40,
+            last_seq: Seq::Num(40),
             session_id: "sess3".into(),
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![
-                CheckpointHistory { last_seq: 40, session_id: "sess3".into() },
-                CheckpointHistory { last_seq: 30, session_id: "sess1".into() },
+                CheckpointHistory { last_seq: Seq::Num(40), session_id: "sess3".into() },
+                CheckpointHistory { last_seq: Seq::Num(30), session_id: "sess1".into() },
             ],
         };
         // Common session "sess1" at seq 30
-        assert_eq!(compare_checkpoints(&source, &target), 30);
+        assert_eq!(compare_checkpoints(&source, &target).as_num(), 30);
     }
 
     #[test]
     fn compare_no_common_session() {
         let source = CheckpointDoc {
-            last_seq: 50,
+            last_seq: Seq::Num(50),
             session_id: "a".into(),
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![],
         };
         let target = CheckpointDoc {
-            last_seq: 40,
+            last_seq: Seq::Num(40),
             session_id: "b".into(),
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![],
         };
-        assert_eq!(compare_checkpoints(&source, &target), 0);
+        assert_eq!(compare_checkpoints(&source, &target).as_num(), 0);
     }
 }

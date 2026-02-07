@@ -1,3 +1,4 @@
 /target
 /.idea
 /docs/plans
+docker-compose.yml

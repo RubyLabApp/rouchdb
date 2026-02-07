@@ -31,7 +31,7 @@ pub struct ReplicationResult {
     pub docs_read: u64,
     pub docs_written: u64,
     pub errors: Vec<String>,
-    pub last_seq: u64,
+    pub last_seq: Seq,
 }
 
 /// Events emitted during replication for progress tracking.
@@ -75,7 +75,7 @@ pub async fn replicate(
         // Step 2: Fetch changes from source
         let changes = source
             .changes(ChangesOptions {
-                since: current_seq,
+                since: current_seq.clone(),
                 limit: Some(opts.batch_size),
                 include_docs: false,
                 ..Default::default()
@@ -152,7 +152,7 @@ pub async fn replicate(
         // Step 6: Save checkpoint
         current_seq = batch_last_seq;
         let _ = checkpointer
-            .write_checkpoint(source, target, current_seq)
+            .write_checkpoint(source, target, current_seq.clone())
             .await;
 
         // Check if we got fewer results than batch_size (last batch)

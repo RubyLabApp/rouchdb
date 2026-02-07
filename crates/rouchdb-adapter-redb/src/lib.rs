@@ -250,7 +250,7 @@ impl Adapter for RedbAdapter {
         Ok(DbInfo {
             db_name: self.name.clone(),
             doc_count,
-            update_seq: meta.update_seq,
+            update_seq: Seq::Num(meta.update_seq),
         })
     }
 
@@ -469,7 +469,7 @@ impl Adapter for RedbAdapter {
 
         let mut results = Vec::new();
 
-        let start = opts.since + 1;
+        let start = opts.since.as_num() + 1;
         let iter = db_err!(changes_table.range(start..))?;
 
         let entries: Vec<_> = iter
@@ -518,7 +518,7 @@ impl Adapter for RedbAdapter {
             };
 
             results.push(ChangeEvent {
-                seq: *seq,
+                seq: Seq::Num(*seq),
                 id: change.doc_id.clone(),
                 changes: vec![ChangeRev { rev: rev_str }],
                 deleted: change.deleted,
@@ -532,7 +532,7 @@ impl Adapter for RedbAdapter {
             }
         }
 
-        let last_seq = results.last().map(|r| r.seq).unwrap_or(opts.since);
+        let last_seq = results.last().map(|r| r.seq.clone()).unwrap_or(opts.since.clone());
 
         Ok(ChangesResponse { results, last_seq })
     }
@@ -1034,7 +1034,7 @@ mod tests {
         let (_dir, db) = temp_db();
         let info = db.info().await.unwrap();
         assert_eq!(info.doc_count, 0);
-        assert_eq!(info.update_seq, 0);
+        assert_eq!(info.update_seq, Seq::Num(0));
     }
 
     #[tokio::test]
@@ -1166,6 +1166,6 @@ mod tests {
         db.destroy().await.unwrap();
         let info = db.info().await.unwrap();
         assert_eq!(info.doc_count, 0);
-        assert_eq!(info.update_seq, 0);
+        assert_eq!(info.update_seq, Seq::Num(0));
     }
 }
