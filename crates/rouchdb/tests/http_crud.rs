@@ -11,7 +11,10 @@ async fn http_put_and_get() {
     let url = fresh_remote_db("http_crud").await;
     let db = Database::http(&url);
 
-    let result = db.put("doc1", serde_json::json!({"name": "Alice"})).await.unwrap();
+    let result = db
+        .put("doc1", serde_json::json!({"name": "Alice"}))
+        .await
+        .unwrap();
     assert!(result.ok);
 
     let doc = db.get("doc1").await.unwrap();
@@ -29,7 +32,10 @@ async fn http_update_document() {
     let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
     let rev = r1.rev.unwrap();
 
-    let r2 = db.update("doc1", &rev, serde_json::json!({"v": 2})).await.unwrap();
+    let r2 = db
+        .update("doc1", &rev, serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
     assert!(r2.ok);
 
     let doc = db.get("doc1").await.unwrap();
@@ -62,9 +68,15 @@ async fn http_all_docs() {
     let url = fresh_remote_db("http_alldocs").await;
     let db = Database::http(&url);
 
-    db.put("alice", serde_json::json!({"name": "Alice"})).await.unwrap();
-    db.put("bob", serde_json::json!({"name": "Bob"})).await.unwrap();
-    db.put("charlie", serde_json::json!({"name": "Charlie"})).await.unwrap();
+    db.put("alice", serde_json::json!({"name": "Alice"}))
+        .await
+        .unwrap();
+    db.put("bob", serde_json::json!({"name": "Bob"}))
+        .await
+        .unwrap();
+    db.put("charlie", serde_json::json!({"name": "Charlie"}))
+        .await
+        .unwrap();
 
     let result = db.all_docs(AllDocsOptions::new()).await.unwrap();
     assert_eq!(result.total_rows, 3);
@@ -81,10 +93,7 @@ async fn http_changes_feed() {
     db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
     db.put("doc2", serde_json::json!({"v": 2})).await.unwrap();
 
-    let changes = db
-        .changes(ChangesOptions::default())
-        .await
-        .unwrap();
+    let changes = db.changes(ChangesOptions::default()).await.unwrap();
     assert_eq!(changes.results.len(), 2);
 
     delete_remote_db(&url).await;

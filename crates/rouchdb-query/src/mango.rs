@@ -85,10 +85,10 @@ pub async fn find(adapter: &dyn Adapter, opts: FindOptions) -> Result<FindRespon
     let mut matched: Vec<serde_json::Value> = Vec::new();
 
     for row in &all.rows {
-        if let Some(ref doc_json) = row.doc {
-            if matches_selector(doc_json, &opts.selector) {
-                matched.push(doc_json.clone());
-            }
+        if let Some(ref doc_json) = row.doc
+            && matches_selector(doc_json, &opts.selector)
+        {
+            matched.push(doc_json.clone());
         }
     }
 
@@ -127,7 +127,10 @@ pub async fn find(adapter: &dyn Adapter, opts: FindOptions) -> Result<FindRespon
 
     // Field projection
     if let Some(ref fields) = opts.fields {
-        matched = matched.into_iter().map(|doc| project(doc, fields)).collect();
+        matched = matched
+            .into_iter()
+            .map(|doc| project(doc, fields))
+            .collect();
     }
 
     Ok(FindResponse { docs: matched })
@@ -181,21 +184,15 @@ fn match_operator(
     operand: &serde_json::Value,
 ) -> bool {
     match op {
-        "$eq" => field_value.map_or(false, |v| collate(v, operand) == std::cmp::Ordering::Equal),
-        "$ne" => field_value.map_or(true, |v| collate(v, operand) != std::cmp::Ordering::Equal),
-        "$gt" => {
-            field_value.map_or(false, |v| collate(v, operand) == std::cmp::Ordering::Greater)
-        }
-        "$gte" => field_value.map_or(false, |v| collate(v, operand) != std::cmp::Ordering::Less),
-        "$lt" => {
-            field_value.map_or(false, |v| collate(v, operand) == std::cmp::Ordering::Less)
-        }
-        "$lte" => {
-            field_value.map_or(false, |v| collate(v, operand) != std::cmp::Ordering::Greater)
-        }
+        "$eq" => field_value.is_some_and(|v| collate(v, operand) == std::cmp::Ordering::Equal),
+        "$ne" => field_value.is_none_or(|v| collate(v, operand) != std::cmp::Ordering::Equal),
+        "$gt" => field_value.is_some_and(|v| collate(v, operand) == std::cmp::Ordering::Greater),
+        "$gte" => field_value.is_some_and(|v| collate(v, operand) != std::cmp::Ordering::Less),
+        "$lt" => field_value.is_some_and(|v| collate(v, operand) == std::cmp::Ordering::Less),
+        "$lte" => field_value.is_some_and(|v| collate(v, operand) != std::cmp::Ordering::Greater),
         "$in" => {
             if let Some(arr) = operand.as_array() {
-                field_value.map_or(false, |v| {
+                field_value.is_some_and(|v| {
                     arr.iter()
                         .any(|item| collate(v, item) == std::cmp::Ordering::Equal)
                 })
@@ -205,7 +202,7 @@ fn match_operator(
         }
         "$nin" => {
             if let Some(arr) = operand.as_array() {
-                field_value.map_or(true, |v| {
+                field_value.is_none_or(|v| {
                     !arr.iter()
                         .any(|item| collate(v, item) == std::cmp::Ordering::Equal)
                 })
@@ -223,16 +220,16 @@ fn match_operator(
         }
         "$type" => {
             if let Some(type_name) = operand.as_str() {
-                field_value.map_or(false, |v| json_type_name(v) == type_name)
+                field_value.is_some_and(|v| json_type_name(v) == type_name)
             } else {
                 false
             }
         }
         "$regex" => {
             if let Some(pattern) = operand.as_str() {
-                field_value.map_or(false, |v| {
+                field_value.is_some_and(|v| {
                     if let Some(s) = v.as_str() {
-                        Regex::new(pattern).map_or(false, |re| re.is_match(s))
+                        Regex::new(pattern).is_ok_and(|re| re.is_match(s))
                     } else {
                         false
                     }
@@ -243,9 +240,9 @@ fn match_operator(
         }
         "$size" => {
             if let Some(expected_size) = operand.as_u64() {
-                field_value.map_or(false, |v| {
+                field_value.is_some_and(|v| {
                     v.as_array()
-                        .map_or(false, |arr| arr.len() as u64 == expected_size)
+                        .is_some_and(|arr| arr.len() as u64 == expected_size)
                 })
             } else {
                 false
@@ -253,7 +250,7 @@ fn match_operator(
         }
         "$all" => {
             if let Some(required) = operand.as_array() {
-                field_value.map_or(false, |v| {
+                field_value.is_some_and(|v| {
                     if let Some(arr) = v.as_array() {
                         required.iter().all(|req| {
                             arr.iter()
@@ -267,7 +264,7 @@ fn match_operator(
                 false
             }
         }
-        "$elemMatch" => field_value.map_or(false, |v| {
+        "$elemMatch" => field_value.is_some_and(|v| {
             if let Some(arr) = v.as_array() {
                 arr.iter().any(|elem| matches_selector(elem, operand))
             } else {
@@ -294,9 +291,8 @@ fn match_operator(
                     let divisor = arr[0].as_i64();
                     let remainder = arr[1].as_i64();
                     if let (Some(d), Some(r)) = (divisor, remainder) {
-                        field_value.map_or(false, |v| {
-                            v.as_i64().map_or(false, |n| d != 0 && n % d == r)
-                        })
+                        field_value
+                            .is_some_and(|v| v.as_i64().is_some_and(|n| d != 0 && n % d == r))
                     } else {
                         false
                     }
@@ -376,7 +372,9 @@ fn project(doc: serde_json::Value, fields: &[String]) -> serde_json::Value {
         }
         // Always include _id
         if let Some(id) = map.get("_id") {
-            result.entry("_id".to_string()).or_insert_with(|| id.clone());
+            result
+                .entry("_id".to_string())
+                .or_insert_with(|| id.clone());
         }
     }
 

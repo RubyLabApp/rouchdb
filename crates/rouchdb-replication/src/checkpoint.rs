@@ -44,11 +44,7 @@ impl Checkpointer {
 
     /// Read the checkpoint from both source and target, and find the last
     /// common sequence number.
-    pub async fn read_checkpoint(
-        &self,
-        source: &dyn Adapter,
-        target: &dyn Adapter,
-    ) -> Result<Seq> {
+    pub async fn read_checkpoint(&self, source: &dyn Adapter, target: &dyn Adapter) -> Result<Seq> {
         let source_cp = self.read_from(source).await;
         let target_cp = self.read_from(target).await;
 
@@ -174,8 +170,14 @@ mod tests {
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![
-                CheckpointHistory { last_seq: Seq::Num(50), session_id: "sess2".into() },
-                CheckpointHistory { last_seq: Seq::Num(30), session_id: "sess1".into() },
+                CheckpointHistory {
+                    last_seq: Seq::Num(50),
+                    session_id: "sess2".into(),
+                },
+                CheckpointHistory {
+                    last_seq: Seq::Num(30),
+                    session_id: "sess1".into(),
+                },
             ],
         };
         let target = CheckpointDoc {
@@ -184,8 +186,14 @@ mod tests {
             version: 1,
             replicator: "rouchdb".into(),
             history: vec![
-                CheckpointHistory { last_seq: Seq::Num(40), session_id: "sess3".into() },
-                CheckpointHistory { last_seq: Seq::Num(30), session_id: "sess1".into() },
+                CheckpointHistory {
+                    last_seq: Seq::Num(40),
+                    session_id: "sess3".into(),
+                },
+                CheckpointHistory {
+                    last_seq: Seq::Num(30),
+                    session_id: "sess1".into(),
+                },
             ],
         };
         // Common session "sess1" at seq 30

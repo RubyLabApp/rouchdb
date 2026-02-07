@@ -3,7 +3,6 @@
 /// Communicates with a remote CouchDB-compatible server via HTTP,
 /// implementing the Adapter trait by mapping each method to the
 /// corresponding CouchDB REST API endpoint.
-
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -177,19 +176,26 @@ impl HttpAdapter {
         match status.as_u16() {
             401 => Err(RouchError::Unauthorized),
             403 => {
-                let body: CouchDbError = response.json().await
-                    .unwrap_or(CouchDbError { error: "forbidden".into(), reason: "access denied".into() });
+                let body: CouchDbError = response.json().await.unwrap_or(CouchDbError {
+                    error: "forbidden".into(),
+                    reason: "access denied".into(),
+                });
                 Err(RouchError::Forbidden(body.reason))
             }
             404 => {
-                let body: CouchDbError = response.json().await
-                    .unwrap_or(CouchDbError { error: "not_found".into(), reason: "missing".into() });
+                let body: CouchDbError = response.json().await.unwrap_or(CouchDbError {
+                    error: "not_found".into(),
+                    reason: "missing".into(),
+                });
                 Err(RouchError::NotFound(body.reason))
             }
             409 => Err(RouchError::Conflict),
             _ => {
                 let body = response.text().await.unwrap_or_default();
-                Err(RouchError::DatabaseError(format!("HTTP {}: {}", status, body)))
+                Err(RouchError::DatabaseError(format!(
+                    "HTTP {}: {}",
+                    status, body
+                )))
             }
         }
     }
@@ -213,10 +219,16 @@ fn parse_seq(value: &serde_json::Value) -> Seq {
 #[async_trait]
 impl Adapter for HttpAdapter {
     async fn info(&self) -> Result<DbInfo> {
-        let resp = self.client.get(&self.base_url).send().await
+        let resp = self
+            .client
+            .get(&self.base_url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let info: CouchDbInfo = resp.json().await
+        let info: CouchDbInfo = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(DbInfo {
@@ -253,10 +265,16 @@ impl Adapter for HttpAdapter {
             url = format!("{}?{}", url, params.join("&"));
         }
 
-        let resp = self.client.get(&url).send().await
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let json: serde_json::Value = resp.json().await
+        let json: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Document::from_json(json)
@@ -274,15 +292,18 @@ impl Adapter for HttpAdapter {
             new_edits: if opts.new_edits { None } else { Some(false) },
         };
 
-        let resp = self.client
-            .post(&self.url("_bulk_docs"))
+        let resp = self
+            .client
+            .post(self.url("_bulk_docs"))
             .json(&request)
             .send()
             .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
 
-        let results: Vec<CouchDbBulkDocsResult> = resp.json().await
+        let results: Vec<CouchDbBulkDocsResult> = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(results
@@ -323,10 +344,16 @@ impl Adapter for HttpAdapter {
             url = format!("{}?{}", url, params.join("&"));
         }
 
-        let resp = self.client.get(&url).send().await
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let result: CouchDbAllDocsResponse = resp.json().await
+        let result: CouchDbAllDocsResponse = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(AllDocsResponse {
@@ -366,19 +393,28 @@ impl Adapter for HttpAdapter {
 
         let url = format!("{}?{}", self.url("_changes"), params.join("&"));
 
-        let resp = if opts.doc_ids.is_some() {
+        let resp = if let Some(doc_ids) = opts.doc_ids {
             let body = serde_json::json!({
-                "doc_ids": opts.doc_ids.unwrap()
+                "doc_ids": doc_ids
             });
-            self.client.post(&url).json(&body).send().await
+            self.client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
                 .map_err(|e| RouchError::DatabaseError(e.to_string()))?
         } else {
-            self.client.get(&url).send().await
+            self.client
+                .get(&url)
+                .send()
+                .await
                 .map_err(|e| RouchError::DatabaseError(e.to_string()))?
         };
 
         let resp = self.check_error(resp).await?;
-        let result: CouchDbChangesResponse = resp.json().await
+        let result: CouchDbChangesResponse = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(ChangesResponse {
@@ -389,7 +425,11 @@ impl Adapter for HttpAdapter {
                 .map(|r| ChangeEvent {
                     seq: parse_seq(&r.seq),
                     id: r.id,
-                    changes: r.changes.into_iter().map(|c| ChangeRev { rev: c.rev }).collect(),
+                    changes: r
+                        .changes
+                        .into_iter()
+                        .map(|c| ChangeRev { rev: c.rev })
+                        .collect(),
                     deleted: r.deleted,
                     doc: r.doc,
                 })
@@ -397,19 +437,19 @@ impl Adapter for HttpAdapter {
         })
     }
 
-    async fn revs_diff(
-        &self,
-        revs: HashMap<String, Vec<String>>,
-    ) -> Result<RevsDiffResponse> {
-        let resp = self.client
-            .post(&self.url("_revs_diff"))
+    async fn revs_diff(&self, revs: HashMap<String, Vec<String>>) -> Result<RevsDiffResponse> {
+        let resp = self
+            .client
+            .post(self.url("_revs_diff"))
             .json(&revs)
             .send()
             .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
 
-        let results: HashMap<String, RevsDiffResult> = resp.json().await
+        let results: HashMap<String, RevsDiffResult> = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(RevsDiffResponse { results })
@@ -426,15 +466,18 @@ impl Adapter for HttpAdapter {
                 .collect(),
         };
 
-        let resp = self.client
-            .post(&self.url("_bulk_get?revs=true"))
+        let resp = self
+            .client
+            .post(self.url("_bulk_get?revs=true"))
             .json(&request)
             .send()
             .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
 
-        let result: CouchDbBulkGetResponse = resp.json().await
+        let result: CouchDbBulkGetResponse = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(BulkGetResponse {
@@ -443,7 +486,8 @@ impl Adapter for HttpAdapter {
                 .into_iter()
                 .map(|r| BulkGetResult {
                     id: r.id,
-                    docs: r.docs
+                    docs: r
+                        .docs
                         .into_iter()
                         .map(|d| BulkGetDoc {
                             ok: d.ok,
@@ -468,9 +512,15 @@ impl Adapter for HttpAdapter {
         data: Vec<u8>,
         content_type: &str,
     ) -> Result<DocResult> {
-        let url = format!("{}/{}?rev={}", self.url(&urlencoded(doc_id)), urlencoded(att_id), rev);
+        let url = format!(
+            "{}/{}?rev={}",
+            self.url(&urlencoded(doc_id)),
+            urlencoded(att_id),
+            rev
+        );
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&url)
             .header("Content-Type", content_type)
             .body(data)
@@ -478,7 +528,9 @@ impl Adapter for HttpAdapter {
             .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let result: CouchDbPutResponse = resp.json().await
+        let result: CouchDbPutResponse = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(DocResult {
@@ -501,10 +553,16 @@ impl Adapter for HttpAdapter {
             url = format!("{}?rev={}", url, rev);
         }
 
-        let resp = self.client.get(&url).send().await
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let bytes = resp.bytes().await
+        let bytes = resp
+            .bytes()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
 
         Ok(bytes.to_vec())
@@ -512,17 +570,28 @@ impl Adapter for HttpAdapter {
 
     async fn get_local(&self, id: &str) -> Result<serde_json::Value> {
         let url = self.url(&format!("_local/{}", urlencoded(id)));
-        let resp = self.client.get(&url).send().await
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         let resp = self.check_error(resp).await?;
-        let json: serde_json::Value = resp.json().await
+        let json: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         Ok(json)
     }
 
     async fn put_local(&self, id: &str, doc: serde_json::Value) -> Result<()> {
         let url = self.url(&format!("_local/{}", urlencoded(id)));
-        let resp = self.client.put(&url).json(&doc).send().await
+        let resp = self
+            .client
+            .put(&url)
+            .json(&doc)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         self.check_error(resp).await?;
         Ok(())
@@ -532,16 +601,25 @@ impl Adapter for HttpAdapter {
         // Need to get the current rev first
         let doc = self.get_local(id).await?;
         let rev = doc["_rev"].as_str().unwrap_or("");
-        let url = format!("{}?rev={}", self.url(&format!("_local/{}", urlencoded(id))), rev);
-        let resp = self.client.delete(&url).send().await
+        let url = format!(
+            "{}?rev={}",
+            self.url(&format!("_local/{}", urlencoded(id))),
+            rev
+        );
+        let resp = self
+            .client
+            .delete(&url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         self.check_error(resp).await?;
         Ok(())
     }
 
     async fn compact(&self) -> Result<()> {
-        let resp = self.client
-            .post(&self.url("_compact"))
+        let resp = self
+            .client
+            .post(self.url("_compact"))
             .header("Content-Type", "application/json")
             .send()
             .await
@@ -551,7 +629,11 @@ impl Adapter for HttpAdapter {
     }
 
     async fn destroy(&self) -> Result<()> {
-        let resp = self.client.delete(&self.base_url).send().await
+        let resp = self
+            .client
+            .delete(&self.base_url)
+            .send()
+            .await
             .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         self.check_error(resp).await?;
         Ok(())

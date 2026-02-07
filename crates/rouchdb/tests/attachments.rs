@@ -11,7 +11,10 @@ async fn attachment_put_and_get_http() {
     let url = fresh_remote_db("attach").await;
     let db = Database::http(&url);
 
-    let r1 = db.put("doc1", serde_json::json!({"name": "test"})).await.unwrap();
+    let r1 = db
+        .put("doc1", serde_json::json!({"name": "test"}))
+        .await
+        .unwrap();
     let rev = r1.rev.unwrap();
 
     let data = b"Hello, CouchDB attachments!".to_vec();
@@ -47,7 +50,13 @@ async fn attachment_binary_data() {
     let binary_data: Vec<u8> = (0..=255).collect();
     let result = db
         .adapter()
-        .put_attachment("doc1", "bytes.bin", &rev, binary_data.clone(), "application/octet-stream")
+        .put_attachment(
+            "doc1",
+            "bytes.bin",
+            &rev,
+            binary_data.clone(),
+            "application/octet-stream",
+        )
         .await
         .unwrap();
     assert!(result.ok);

@@ -30,8 +30,13 @@ async fn database_compact_http() {
     let db = Database::http(&url);
 
     let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
-    let r2 = db.update("doc1", &r1.rev.unwrap(), serde_json::json!({"v": 2})).await.unwrap();
-    db.update("doc1", &r2.rev.unwrap(), serde_json::json!({"v": 3})).await.unwrap();
+    let r2 = db
+        .update("doc1", &r1.rev.unwrap(), serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
+    db.update("doc1", &r2.rev.unwrap(), serde_json::json!({"v": 3}))
+        .await
+        .unwrap();
 
     db.compact().await.unwrap();
 
@@ -73,7 +78,7 @@ async fn cross_adapter_fidelity_memory_couchdb_redb() {
     let data = serde_json::json!({
         "string": "hello",
         "int": 42,
-        "float": 3.14,
+        "float": 3.15,
         "bool_t": true,
         "bool_f": false,
         "null_val": null,

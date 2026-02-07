@@ -9,7 +9,6 @@
 /// This module provides comparison and encoding functions that match this
 /// ordering, ensuring consistent behavior across local storage and remote
 /// CouchDB instances.
-
 use serde_json::Value;
 use std::cmp::Ordering;
 
@@ -263,14 +262,8 @@ mod tests {
     #[test]
     fn object_ordering() {
         assert_eq!(collate(&json!({}), &json!({"a": 1})), Ordering::Less);
-        assert_eq!(
-            collate(&json!({"a": 1}), &json!({"a": 2})),
-            Ordering::Less
-        );
-        assert_eq!(
-            collate(&json!({"a": 1}), &json!({"b": 1})),
-            Ordering::Less
-        );
+        assert_eq!(collate(&json!({"a": 1}), &json!({"a": 2})), Ordering::Less);
+        assert_eq!(collate(&json!({"a": 1}), &json!({"b": 1})), Ordering::Less);
     }
 
     #[test]
@@ -288,7 +281,7 @@ mod tests {
             json!({}),
         ];
 
-        let encoded: Vec<String> = values.iter().map(|v| to_indexable_string(v)).collect();
+        let encoded: Vec<String> = values.iter().map(to_indexable_string).collect();
 
         for i in 0..encoded.len() {
             for j in (i + 1)..encoded.len() {

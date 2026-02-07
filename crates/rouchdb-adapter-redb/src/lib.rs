@@ -14,8 +14,8 @@ use rouchdb_core::document::*;
 use rouchdb_core::error::{Result, RouchError};
 use rouchdb_core::merge::{collect_conflicts, is_deleted, merge_tree, winning_rev};
 use rouchdb_core::rev_tree::{
-    build_path_from_revs, collect_leaves, find_rev_ancestry, rev_exists, NodeOpts, RevNode,
-    RevPath, RevStatus, RevTree,
+    NodeOpts, RevNode, RevPath, RevStatus, RevTree, build_path_from_revs, collect_leaves,
+    find_rev_ancestry, rev_exists,
 };
 
 const DEFAULT_REV_LIMIT: u64 = 1000;
@@ -164,15 +164,31 @@ impl RedbAdapter {
                 .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
             // Opening tables in a write transaction creates them if they don't exist
             {
-                write_txn.open_table(DOC_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-                write_txn.open_table(REV_DATA_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-                write_txn.open_table(CHANGES_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-                write_txn.open_table(LOCAL_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-                write_txn.open_table(ATTACHMENT_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                write_txn
+                    .open_table(DOC_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                write_txn
+                    .open_table(REV_DATA_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                write_txn
+                    .open_table(CHANGES_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                write_txn
+                    .open_table(LOCAL_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                write_txn
+                    .open_table(ATTACHMENT_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
             }
             {
-                let mut meta = write_txn.open_table(META_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-                if meta.get("meta").map_err(|e| RouchError::DatabaseError(e.to_string()))?.is_none() {
+                let mut meta = write_txn
+                    .open_table(META_TABLE)
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+                if meta
+                    .get("meta")
+                    .map_err(|e| RouchError::DatabaseError(e.to_string()))?
+                    .is_none()
+                {
                     let record = MetaRecord {
                         update_seq: 0,
                         db_uuid: Uuid::new_v4().to_string(),
@@ -182,7 +198,9 @@ impl RedbAdapter {
                         .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
                 }
             }
-            write_txn.commit().map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+            write_txn
+                .commit()
+                .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
         }
 
         Ok(Self {
@@ -193,16 +211,27 @@ impl RedbAdapter {
     }
 
     fn read_meta(&self) -> Result<MetaRecord> {
-        let read_txn = self.db.begin_read().map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-        let table = read_txn.open_table(META_TABLE).map_err(|e| RouchError::DatabaseError(e.to_string()))?;
-        let guard = table.get("meta").map_err(|e| RouchError::DatabaseError(e.to_string()))?
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        let table = read_txn
+            .open_table(META_TABLE)
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        let guard = table
+            .get("meta")
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?
             .ok_or_else(|| RouchError::DatabaseError("missing metadata".into()))?;
         let meta: MetaRecord = serde_json::from_slice(guard.value())?;
         Ok(meta)
     }
 }
 
-fn generate_rev_hash(doc_data: &serde_json::Value, deleted: bool, prev_rev: Option<&str>) -> String {
+fn generate_rev_hash(
+    doc_data: &serde_json::Value,
+    deleted: bool,
+    prev_rev: Option<&str>,
+) -> String {
     let mut hasher = Md5::new();
     if let Some(prev) = prev_rev {
         hasher.update(prev.as_bytes());
@@ -259,8 +288,8 @@ impl Adapter for RedbAdapter {
         let doc_table = db_err!(read_txn.open_table(DOC_TABLE))?;
         let rev_table = db_err!(read_txn.open_table(REV_DATA_TABLE))?;
 
-        let guard = db_err!(doc_table.get(id))?
-            .ok_or_else(|| RouchError::NotFound(id.to_string()))?;
+        let guard =
+            db_err!(doc_table.get(id))?.ok_or_else(|| RouchError::NotFound(id.to_string()))?;
         let record: DocRecord = serde_json::from_slice(guard.value())?;
         let tree = serialized_to_rev_tree(&record.rev_tree);
 
@@ -385,10 +414,10 @@ impl Adapter for RedbAdapter {
 
             // Apply key range filters
             if opts.keys.is_none() && opts.key.is_none() {
-                if let Some(ref start) = opts.start_key {
-                    if doc_id.as_str() < start.as_str() {
-                        continue;
-                    }
+                if let Some(ref start) = opts.start_key
+                    && doc_id.as_str() < start.as_str()
+                {
+                    continue;
                 }
                 if let Some(ref end) = opts.end_key {
                     if opts.inclusive_end {
@@ -401,16 +430,16 @@ impl Adapter for RedbAdapter {
                 }
             }
 
-            if let Some(ref key) = opts.key {
-                if &doc_id != key {
-                    continue;
-                }
+            if let Some(ref key) = opts.key
+                && &doc_id != key
+            {
+                continue;
             }
 
-            if let Some(ref keys) = opts.keys {
-                if !keys.contains(&doc_id) {
-                    continue;
-                }
+            if let Some(ref keys) = opts.keys
+                && !keys.contains(&doc_id)
+            {
+                continue;
             }
 
             let doc_json = if opts.include_docs && !deleted {
@@ -474,7 +503,12 @@ impl Adapter for RedbAdapter {
 
         let entries: Vec<_> = iter
             .filter_map(|e| e.ok())
-            .map(|e| (e.0.value(), serde_json::from_slice::<ChangeRecord>(e.1.value()).unwrap()))
+            .map(|e| {
+                (
+                    e.0.value(),
+                    serde_json::from_slice::<ChangeRecord>(e.1.value()).unwrap(),
+                )
+            })
             .collect();
 
         let iter: Box<dyn Iterator<Item = &(u64, ChangeRecord)>> = if opts.descending {
@@ -484,10 +518,10 @@ impl Adapter for RedbAdapter {
         };
 
         for (seq, change) in iter {
-            if let Some(ref doc_ids) = opts.doc_ids {
-                if !doc_ids.contains(&change.doc_id) {
-                    continue;
-                }
+            if let Some(ref doc_ids) = opts.doc_ids
+                && !doc_ids.contains(&change.doc_id)
+            {
+                continue;
             }
 
             let rev_str = db_err!(doc_table.get(change.doc_id.as_str()))?
@@ -506,7 +540,10 @@ impl Adapter for RedbAdapter {
                         serde_json::Value::Object(m) => m,
                         _ => serde_json::Map::new(),
                     };
-                    obj.insert("_id".into(), serde_json::Value::String(change.doc_id.clone()));
+                    obj.insert(
+                        "_id".into(),
+                        serde_json::Value::String(change.doc_id.clone()),
+                    );
                     obj.insert("_rev".into(), serde_json::Value::String(rev_str.clone()));
                     if change.deleted {
                         obj.insert("_deleted".into(), serde_json::Value::Bool(true));
@@ -525,22 +562,22 @@ impl Adapter for RedbAdapter {
                 doc,
             });
 
-            if let Some(limit) = opts.limit {
-                if results.len() >= limit as usize {
-                    break;
-                }
+            if let Some(limit) = opts.limit
+                && results.len() >= limit as usize
+            {
+                break;
             }
         }
 
-        let last_seq = results.last().map(|r| r.seq.clone()).unwrap_or(opts.since.clone());
+        let last_seq = results
+            .last()
+            .map(|r| r.seq.clone())
+            .unwrap_or(opts.since.clone());
 
         Ok(ChangesResponse { results, last_seq })
     }
 
-    async fn revs_diff(
-        &self,
-        revs: HashMap<String, Vec<String>>,
-    ) -> Result<RevsDiffResponse> {
+    async fn revs_diff(&self, revs: HashMap<String, Vec<String>>) -> Result<RevsDiffResponse> {
         let read_txn = db_err!(self.db.begin_read())?;
         let doc_table = db_err!(read_txn.open_table(DOC_TABLE))?;
 
@@ -580,7 +617,13 @@ impl Adapter for RedbAdapter {
             }
 
             if !missing.is_empty() {
-                results.insert(doc_id, RevsDiffResult { missing, possible_ancestors });
+                results.insert(
+                    doc_id,
+                    RevsDiffResult {
+                        missing,
+                        possible_ancestors,
+                    },
+                );
             }
         }
 
@@ -611,11 +654,16 @@ impl Adapter for RedbAdapter {
                                 bulk_docs.push(BulkGetDoc {
                                     ok: None,
                                     error: Some(BulkGetError {
-                                        id: item.id.clone(), rev: item.rev.unwrap_or_default(),
-                                        error: "not_found".into(), reason: "missing".into(),
+                                        id: item.id.clone(),
+                                        rev: item.rev.unwrap_or_default(),
+                                        error: "not_found".into(),
+                                        reason: "missing".into(),
                                     }),
                                 });
-                                results.push(BulkGetResult { id: item.id, docs: bulk_docs });
+                                results.push(BulkGetResult {
+                                    id: item.id,
+                                    docs: bulk_docs,
+                                });
                                 continue;
                             }
                         }
@@ -635,16 +683,16 @@ impl Adapter for RedbAdapter {
                         }
 
                         // Include _revisions for replication
-                        if let Ok((pos, ref hash)) = parse_rev(&rev_str) {
-                            if let Some(ancestry) = find_rev_ancestry(&tree, pos, hash) {
-                                obj.insert(
-                                    "_revisions".into(),
-                                    serde_json::json!({
-                                        "start": pos,
-                                        "ids": ancestry
-                                    }),
-                                );
-                            }
+                        if let Ok((pos, ref hash)) = parse_rev(&rev_str)
+                            && let Some(ancestry) = find_rev_ancestry(&tree, pos, hash)
+                        {
+                            obj.insert(
+                                "_revisions".into(),
+                                serde_json::json!({
+                                    "start": pos,
+                                    "ids": ancestry
+                                }),
+                            );
                         }
 
                         bulk_docs.push(BulkGetDoc {
@@ -655,8 +703,10 @@ impl Adapter for RedbAdapter {
                         bulk_docs.push(BulkGetDoc {
                             ok: None,
                             error: Some(BulkGetError {
-                                id: item.id.clone(), rev: rev_str,
-                                error: "not_found".into(), reason: "missing".into(),
+                                id: item.id.clone(),
+                                rev: rev_str,
+                                error: "not_found".into(),
+                                reason: "missing".into(),
                             }),
                         });
                     }
@@ -665,14 +715,19 @@ impl Adapter for RedbAdapter {
                     bulk_docs.push(BulkGetDoc {
                         ok: None,
                         error: Some(BulkGetError {
-                            id: item.id.clone(), rev: item.rev.unwrap_or_default(),
-                            error: "not_found".into(), reason: "missing".into(),
+                            id: item.id.clone(),
+                            rev: item.rev.unwrap_or_default(),
+                            error: "not_found".into(),
+                            reason: "missing".into(),
                         }),
                     });
                 }
             }
 
-            results.push(BulkGetResult { id: item.id, docs: bulk_docs });
+            results.push(BulkGetResult {
+                id: item.id,
+                docs: bulk_docs,
+            });
         }
 
         Ok(BulkGetResponse { results })
@@ -687,7 +742,9 @@ impl Adapter for RedbAdapter {
         _content_type: &str,
     ) -> Result<DocResult> {
         // TODO: implement attachment support
-        Err(RouchError::BadRequest("attachments not yet implemented for redb".into()))
+        Err(RouchError::BadRequest(
+            "attachments not yet implemented for redb".into(),
+        ))
     }
 
     async fn get_attachment(
@@ -696,7 +753,9 @@ impl Adapter for RedbAdapter {
         _att_id: &str,
         _opts: GetAttachmentOptions,
     ) -> Result<Vec<u8>> {
-        Err(RouchError::BadRequest("attachments not yet implemented for redb".into()))
+        Err(RouchError::BadRequest(
+            "attachments not yet implemented for redb".into(),
+        ))
     }
 
     async fn get_local(&self, id: &str) -> Result<serde_json::Value> {
@@ -820,7 +879,9 @@ fn process_doc_new_edits(
     // Load existing record (clone data out of access guard immediately)
     let existing_record: Option<DocRecord> = {
         let existing = db_err!(doc_table.get(doc_id.as_str()))?;
-        existing.as_ref().and_then(|g| serde_json::from_slice(g.value()).ok())
+        existing
+            .as_ref()
+            .and_then(|g| serde_json::from_slice(g.value()).ok())
     };
 
     let existing_tree = existing_record
@@ -836,7 +897,9 @@ fn process_doc_new_edits(
             (Some(provided_rev), Some(current_winner)) => {
                 if provided_rev.to_string() != current_winner.to_string() {
                     return Ok(DocResult {
-                        ok: false, id: doc_id, rev: None,
+                        ok: false,
+                        id: doc_id,
+                        rev: None,
                         error: Some("conflict".into()),
                         reason: Some("Document update conflict".into()),
                     });
@@ -845,7 +908,9 @@ fn process_doc_new_edits(
             (None, Some(_)) => {
                 if !is_deleted(&tree) {
                     return Ok(DocResult {
-                        ok: false, id: doc_id, rev: None,
+                        ok: false,
+                        id: doc_id,
+                        rev: None,
                         error: Some("conflict".into()),
                         reason: Some("Document update conflict".into()),
                     });
@@ -855,7 +920,9 @@ fn process_doc_new_edits(
         }
     } else if doc.rev.is_some() {
         return Ok(DocResult {
-            ok: false, id: doc_id, rev: None,
+            ok: false,
+            id: doc_id,
+            rev: None,
             error: Some("not_found".into()),
             reason: Some("missing".into()),
         });
@@ -872,8 +939,11 @@ fn process_doc_new_edits(
         rev_hashes.push(prev.hash.clone());
     }
     let new_path = build_path_from_revs(
-        new_pos, &rev_hashes,
-        NodeOpts { deleted: doc.deleted },
+        new_pos,
+        &rev_hashes,
+        NodeOpts {
+            deleted: doc.deleted,
+        },
         RevStatus::Available,
     );
 
@@ -897,19 +967,28 @@ fn process_doc_new_edits(
     db_err!(doc_table.insert(doc_id.as_str(), doc_bytes.as_slice()))?;
 
     // Save rev data
-    let rd = RevDataRecord { data: doc.data, deleted: doc.deleted };
+    let rd = RevDataRecord {
+        data: doc.data,
+        deleted: doc.deleted,
+    };
     let rev_bytes = serde_json::to_vec(&rd)?;
     let key = rev_data_key(&doc_id, &new_rev_str);
     db_err!(rev_table.insert(key.as_str(), rev_bytes.as_slice()))?;
 
     // Save change
-    let change = ChangeRecord { doc_id: doc_id.clone(), deleted: doc.deleted };
+    let change = ChangeRecord {
+        doc_id: doc_id.clone(),
+        deleted: doc.deleted,
+    };
     let change_bytes = serde_json::to_vec(&change)?;
     db_err!(changes_table.insert(seq, change_bytes.as_slice()))?;
 
     Ok(DocResult {
-        ok: true, id: doc_id, rev: Some(new_rev_str),
-        error: None, reason: None,
+        ok: true,
+        id: doc_id,
+        rev: Some(new_rev_str),
+        error: None,
+        reason: None,
     })
 }
 
@@ -925,7 +1004,9 @@ fn process_doc_replication(
         Some(r) => r.clone(),
         None => {
             return Ok(DocResult {
-                ok: false, id: doc_id, rev: None,
+                ok: false,
+                id: doc_id,
+                rev: None,
                 error: Some("bad_request".into()),
                 reason: Some("missing _rev".into()),
             });
@@ -936,7 +1017,9 @@ fn process_doc_replication(
 
     let existing_record: Option<DocRecord> = {
         let existing = db_err!(doc_table.get(doc_id.as_str()))?;
-        existing.as_ref().and_then(|g| serde_json::from_slice(g.value()).ok())
+        existing
+            .as_ref()
+            .and_then(|g| serde_json::from_slice(g.value()).ok())
     };
 
     let existing_tree = existing_record
@@ -959,7 +1042,9 @@ fn process_doc_replication(
         build_path_from_revs(
             start,
             &ids,
-            NodeOpts { deleted: doc.deleted },
+            NodeOpts {
+                deleted: doc.deleted,
+            },
             RevStatus::Available,
         )
     } else {
@@ -969,7 +1054,9 @@ fn process_doc_replication(
             tree: RevNode {
                 hash: rev.hash.clone(),
                 status: RevStatus::Available,
-                opts: NodeOpts { deleted: doc.deleted },
+                opts: NodeOpts {
+                    deleted: doc.deleted,
+                },
                 children: vec![],
             },
         }
@@ -998,18 +1085,27 @@ fn process_doc_replication(
     let doc_bytes = serde_json::to_vec(&new_record)?;
     db_err!(doc_table.insert(doc_id.as_str(), doc_bytes.as_slice()))?;
 
-    let rd = RevDataRecord { data: doc.data, deleted: doc.deleted };
+    let rd = RevDataRecord {
+        data: doc.data,
+        deleted: doc.deleted,
+    };
     let rev_bytes = serde_json::to_vec(&rd)?;
     let key = rev_data_key(&doc_id, &rev_str);
     db_err!(rev_table.insert(key.as_str(), rev_bytes.as_slice()))?;
 
-    let change = ChangeRecord { doc_id: doc_id.clone(), deleted: doc_deleted };
+    let change = ChangeRecord {
+        doc_id: doc_id.clone(),
+        deleted: doc_deleted,
+    };
     let change_bytes = serde_json::to_vec(&change)?;
     db_err!(changes_table.insert(seq, change_bytes.as_slice()))?;
 
     Ok(DocResult {
-        ok: true, id: doc_id, rev: Some(rev_str),
-        error: None, reason: None,
+        ok: true,
+        id: doc_id,
+        rev: Some(rev_str),
+        error: None,
+        reason: None,
     })
 }
 
@@ -1042,11 +1138,16 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(results[0].ok);
 
         let fetched = db.get("doc1", GetOptions::default()).await.unwrap();
@@ -1058,20 +1159,30 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"v": 1}),
             attachments: HashMap::new(),
         };
-        let r1 = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let r1 = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         let rev1: Revision = r1[0].rev.clone().unwrap().parse().unwrap();
 
         // Successful update
         let doc2 = Document {
-            id: "doc1".into(), rev: Some(rev1), deleted: false,
+            id: "doc1".into(),
+            rev: Some(rev1),
+            deleted: false,
             data: serde_json::json!({"v": 2}),
             attachments: HashMap::new(),
         };
-        let r2 = db.bulk_docs(vec![doc2], BulkDocsOptions::new()).await.unwrap();
+        let r2 = db
+            .bulk_docs(vec![doc2], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(r2[0].ok);
 
         // Conflict
@@ -1082,7 +1193,10 @@ mod tests {
             data: serde_json::json!({"v": 3}),
             attachments: HashMap::new(),
         };
-        let r3 = db.bulk_docs(vec![bad], BulkDocsOptions::new()).await.unwrap();
+        let r3 = db
+            .bulk_docs(vec![bad], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(!r3[0].ok);
     }
 
@@ -1092,11 +1206,15 @@ mod tests {
 
         for i in 0..3 {
             let doc = Document {
-                id: format!("doc{}", i), rev: None, deleted: false,
+                id: format!("doc{}", i),
+                rev: None,
+                deleted: false,
                 data: serde_json::json!({"i": i}),
                 attachments: HashMap::new(),
             };
-            db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+            db.bulk_docs(vec![doc], BulkDocsOptions::new())
+                .await
+                .unwrap();
         }
 
         let changes = db.changes(ChangesOptions::default()).await.unwrap();
@@ -1109,11 +1227,15 @@ mod tests {
 
         for name in ["charlie", "alice", "bob"] {
             let doc = Document {
-                id: name.into(), rev: None, deleted: false,
+                id: name.into(),
+                rev: None,
+                deleted: false,
                 data: serde_json::json!({}),
                 attachments: HashMap::new(),
             };
-            db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+            db.bulk_docs(vec![doc], BulkDocsOptions::new())
+                .await
+                .unwrap();
         }
 
         let result = db.all_docs(AllDocsOptions::new()).await.unwrap();
@@ -1126,7 +1248,9 @@ mod tests {
     async fn local_docs() {
         let (_dir, db) = temp_db();
 
-        db.put_local("ck1", serde_json::json!({"seq": 5})).await.unwrap();
+        db.put_local("ck1", serde_json::json!({"seq": 5}))
+            .await
+            .unwrap();
         let fetched = db.get_local("ck1").await.unwrap();
         assert_eq!(fetched["seq"], 5);
 
@@ -1145,7 +1269,10 @@ mod tests {
             data: serde_json::json!({"from": "remote"}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::replication()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::replication())
+            .await
+            .unwrap();
         assert!(results[0].ok);
 
         let fetched = db.get("doc1", GetOptions::default()).await.unwrap();
@@ -1157,11 +1284,15 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
         db.destroy().await.unwrap();
         let info = db.info().await.unwrap();
@@ -1174,16 +1305,23 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
-        let result = db.all_docs(AllDocsOptions {
-            include_docs: true,
-            ..AllDocsOptions::new()
-        }).await.unwrap();
+        let result = db
+            .all_docs(AllDocsOptions {
+                include_docs: true,
+                ..AllDocsOptions::new()
+            })
+            .await
+            .unwrap();
         assert_eq!(result.rows.len(), 1);
         let doc_json = result.rows[0].doc.as_ref().unwrap();
         assert_eq!(doc_json["name"], "Alice");
@@ -1195,16 +1333,23 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"val": 42}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
-        let changes = db.changes(ChangesOptions {
-            include_docs: true,
-            ..Default::default()
-        }).await.unwrap();
+        let changes = db
+            .changes(ChangesOptions {
+                include_docs: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert_eq!(changes.results.len(), 1);
         let doc_json = changes.results[0].doc.as_ref().unwrap();
         assert_eq!(doc_json["val"], 42);
@@ -1216,24 +1361,36 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"v": 1}),
             attachments: HashMap::new(),
         };
-        let r1 = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let r1 = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         let rev1: Revision = r1[0].rev.clone().unwrap().parse().unwrap();
 
         let del = Document {
-            id: "doc1".into(), rev: Some(rev1), deleted: true,
+            id: "doc1".into(),
+            rev: Some(rev1),
+            deleted: true,
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![del], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![del], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
-        let changes = db.changes(ChangesOptions {
-            include_docs: true,
-            ..Default::default()
-        }).await.unwrap();
+        let changes = db
+            .changes(ChangesOptions {
+                include_docs: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         // Only the latest change entry should remain (update replaces)
         let last = changes.results.last().unwrap();
         assert!(last.deleted);
@@ -1252,7 +1409,9 @@ mod tests {
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::replication()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::replication())
+            .await
+            .unwrap();
 
         let mut revs = HashMap::new();
         revs.insert("doc1".into(), vec!["1-abc".into(), "2-def".into()]);
@@ -1273,16 +1432,29 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
-        let response = db.bulk_get(vec![
-            BulkGetItem { id: "doc1".into(), rev: None },
-            BulkGetItem { id: "nonexistent".into(), rev: None },
-        ]).await.unwrap();
+        let response = db
+            .bulk_get(vec![
+                BulkGetItem {
+                    id: "doc1".into(),
+                    rev: None,
+                },
+                BulkGetItem {
+                    id: "nonexistent".into(),
+                    rev: None,
+                },
+            ])
+            .await
+            .unwrap();
 
         assert_eq!(response.results.len(), 2);
         // doc1 should be found
@@ -1299,11 +1471,16 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: String::new(), rev: None, deleted: false,
+            id: String::new(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"auto": true}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(results[0].ok);
         assert!(!results[0].id.is_empty());
 
@@ -1316,19 +1493,28 @@ mod tests {
         let (_dir, db) = temp_db();
 
         let doc = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"v": 1}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
         // Try to create again without rev => conflict
         let doc2 = Document {
-            id: "doc1".into(), rev: None, deleted: false,
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
             data: serde_json::json!({"v": 2}),
             attachments: HashMap::new(),
         };
-        let r = db.bulk_docs(vec![doc2], BulkDocsOptions::new()).await.unwrap();
+        let r = db
+            .bulk_docs(vec![doc2], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(!r[0].ok);
         assert_eq!(r[0].error.as_deref(), Some("conflict"));
     }
@@ -1344,7 +1530,10 @@ mod tests {
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        let r = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let r = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(!r[0].ok);
         assert_eq!(r[0].error.as_deref(), Some("not_found"));
     }
@@ -1366,7 +1555,10 @@ mod tests {
             }),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::replication()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::replication())
+            .await
+            .unwrap();
         assert!(results[0].ok);
 
         let fetched = db.get("doc1", GetOptions::default()).await.unwrap();
@@ -1401,7 +1593,9 @@ mod tests {
             data: serde_json::json!({"branch": "a"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc1], BulkDocsOptions::replication()).await.unwrap();
+        db.bulk_docs(vec![doc1], BulkDocsOptions::replication())
+            .await
+            .unwrap();
 
         let doc2 = Document {
             id: "doc1".into(),
@@ -1410,9 +1604,20 @@ mod tests {
             data: serde_json::json!({"branch": "b"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc2], BulkDocsOptions::replication()).await.unwrap();
+        db.bulk_docs(vec![doc2], BulkDocsOptions::replication())
+            .await
+            .unwrap();
 
-        let fetched = db.get("doc1", GetOptions { conflicts: true, ..Default::default() }).await.unwrap();
+        let fetched = db
+            .get(
+                "doc1",
+                GetOptions {
+                    conflicts: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert!(fetched.data["_conflicts"].is_array());
         assert_eq!(fetched.data["_conflicts"].as_array().unwrap().len(), 1);
     }

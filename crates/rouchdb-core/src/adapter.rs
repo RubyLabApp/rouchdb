@@ -49,10 +49,7 @@ pub trait Adapter: Send + Sync {
     /// Compare sets of document revisions to find which ones the adapter
     /// is missing. Used during replication to avoid transferring data the
     /// target already has.
-    async fn revs_diff(
-        &self,
-        revs: HashMap<String, Vec<String>>,
-    ) -> Result<RevsDiffResponse>;
+    async fn revs_diff(&self, revs: HashMap<String, Vec<String>>) -> Result<RevsDiffResponse>;
 
     /// Fetch multiple documents by ID and revision in a single request.
     /// Used during replication to efficiently retrieve missing documents.

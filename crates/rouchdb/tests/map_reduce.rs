@@ -3,7 +3,7 @@
 mod common;
 
 use common::{delete_remote_db, fresh_remote_db};
-use rouchdb::{query_view, Database, ReduceFn, ViewQueryOptions};
+use rouchdb::{Database, ReduceFn, ViewQueryOptions, query_view};
 
 #[tokio::test]
 #[ignore]
@@ -12,9 +12,24 @@ async fn view_basic_map() {
     let remote = Database::http(&url);
     let local = Database::memory("local");
 
-    remote.put("a", serde_json::json!({"type": "person", "name": "Alice", "age": 30})).await.unwrap();
-    remote.put("b", serde_json::json!({"type": "person", "name": "Bob", "age": 25})).await.unwrap();
-    remote.put("c", serde_json::json!({"type": "city", "name": "NYC"})).await.unwrap();
+    remote
+        .put(
+            "a",
+            serde_json::json!({"type": "person", "name": "Alice", "age": 30}),
+        )
+        .await
+        .unwrap();
+    remote
+        .put(
+            "b",
+            serde_json::json!({"type": "person", "name": "Bob", "age": 25}),
+        )
+        .await
+        .unwrap();
+    remote
+        .put("c", serde_json::json!({"type": "city", "name": "NYC"}))
+        .await
+        .unwrap();
 
     local.replicate_from(&remote).await.unwrap();
 
@@ -26,14 +41,9 @@ async fn view_basic_map() {
         }
     };
 
-    let results = query_view(
-        local.adapter(),
-        &map_fn,
-        None,
-        ViewQueryOptions::new(),
-    )
-    .await
-    .unwrap();
+    let results = query_view(local.adapter(), &map_fn, None, ViewQueryOptions::new())
+        .await
+        .unwrap();
 
     assert_eq!(results.rows.len(), 2);
     assert_eq!(results.rows[0].key, "Alice");
@@ -50,9 +60,18 @@ async fn view_reduce_sum_and_count() {
     let remote = Database::http(&url);
     let local = Database::memory("local");
 
-    remote.put("a", serde_json::json!({"dept": "eng", "salary": 100})).await.unwrap();
-    remote.put("b", serde_json::json!({"dept": "eng", "salary": 120})).await.unwrap();
-    remote.put("c", serde_json::json!({"dept": "sales", "salary": 90})).await.unwrap();
+    remote
+        .put("a", serde_json::json!({"dept": "eng", "salary": 100}))
+        .await
+        .unwrap();
+    remote
+        .put("b", serde_json::json!({"dept": "eng", "salary": 120}))
+        .await
+        .unwrap();
+    remote
+        .put("c", serde_json::json!({"dept": "sales", "salary": 90}))
+        .await
+        .unwrap();
 
     local.replicate_from(&remote).await.unwrap();
 
@@ -65,7 +84,10 @@ async fn view_reduce_sum_and_count() {
         local.adapter(),
         &map_fn,
         Some(&ReduceFn::Sum),
-        ViewQueryOptions { reduce: true, ..ViewQueryOptions::new() },
+        ViewQueryOptions {
+            reduce: true,
+            ..ViewQueryOptions::new()
+        },
     )
     .await
     .unwrap();
@@ -78,7 +100,10 @@ async fn view_reduce_sum_and_count() {
         local.adapter(),
         &map_fn,
         Some(&ReduceFn::Count),
-        ViewQueryOptions { reduce: true, ..ViewQueryOptions::new() },
+        ViewQueryOptions {
+            reduce: true,
+            ..ViewQueryOptions::new()
+        },
     )
     .await
     .unwrap();
@@ -89,7 +114,11 @@ async fn view_reduce_sum_and_count() {
         local.adapter(),
         &map_fn,
         Some(&ReduceFn::Sum),
-        ViewQueryOptions { reduce: true, group: true, ..ViewQueryOptions::new() },
+        ViewQueryOptions {
+            reduce: true,
+            group: true,
+            ..ViewQueryOptions::new()
+        },
     )
     .await
     .unwrap();
@@ -111,7 +140,10 @@ async fn view_key_range() {
     let local = Database::memory("local");
 
     for i in 0..10 {
-        remote.put(&format!("d{}", i), serde_json::json!({"n": i})).await.unwrap();
+        remote
+            .put(&format!("d{}", i), serde_json::json!({"n": i}))
+            .await
+            .unwrap();
     }
 
     local.replicate_from(&remote).await.unwrap();

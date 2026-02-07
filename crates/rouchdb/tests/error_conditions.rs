@@ -25,7 +25,9 @@ async fn error_update_wrong_rev() {
 
     db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
 
-    let result = db.update("doc1", "1-bogusrevisionhash", serde_json::json!({"v": 2})).await;
+    let result = db
+        .update("doc1", "1-bogusrevisionhash", serde_json::json!({"v": 2}))
+        .await;
     assert!(result.is_err() || !result.unwrap().ok);
 
     delete_remote_db(&url).await;

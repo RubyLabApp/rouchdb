@@ -4,9 +4,8 @@
 /// - Merge incoming revision paths into an existing tree
 /// - Determine the winning revision deterministically
 /// - Stem (prune) old revisions beyond a configurable limit
-
 use crate::document::Revision;
-use crate::rev_tree::{collect_leaves, RevNode, RevPath, RevStatus, RevTree};
+use crate::rev_tree::{RevNode, RevPath, RevStatus, RevTree, collect_leaves};
 
 /// Result of merging a new path into the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,10 +245,7 @@ fn graft_nodes(target: &mut RevNode, new_nodes: &[RevNode]) -> MergeResult {
 
     for new_node in new_nodes {
         // Check if a child with this hash already exists
-        let existing_child = target
-            .children
-            .iter_mut()
-            .find(|c| c.hash == new_node.hash);
+        let existing_child = target.children.iter_mut().find(|c| c.hash == new_node.hash);
 
         match existing_child {
             Some(existing) => {
@@ -457,7 +453,7 @@ fn find_first_available_leaf(node: &RevNode, pos: u64) -> Option<Revision> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rev_tree::{build_path_from_revs, NodeOpts, RevNode, RevPath};
+    use crate::rev_tree::{NodeOpts, RevNode, RevPath, build_path_from_revs};
 
     fn leaf(hash: &str) -> RevNode {
         RevNode {

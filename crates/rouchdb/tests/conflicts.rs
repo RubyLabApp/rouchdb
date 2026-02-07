@@ -12,7 +12,10 @@ async fn conflict_both_sides_modify_same_doc() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": "original"})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": "original"}))
+        .await
+        .unwrap();
     let original_rev = r1.rev.unwrap();
     local.replicate_to(&remote).await.unwrap();
 
@@ -20,11 +23,19 @@ async fn conflict_both_sides_modify_same_doc() {
     assert_eq!(remote_doc.rev.unwrap().to_string(), original_rev);
 
     local
-        .update("doc1", &original_rev, serde_json::json!({"v": "local_edit"}))
+        .update(
+            "doc1",
+            &original_rev,
+            serde_json::json!({"v": "local_edit"}),
+        )
         .await
         .unwrap();
     remote
-        .update("doc1", &original_rev, serde_json::json!({"v": "remote_edit"}))
+        .update(
+            "doc1",
+            &original_rev,
+            serde_json::json!({"v": "remote_edit"}),
+        )
         .await
         .unwrap();
 
@@ -33,11 +44,23 @@ async fn conflict_both_sides_modify_same_doc() {
     assert!(pull.ok);
 
     let local_doc = local
-        .get_with_opts("doc1", GetOptions { conflicts: true, ..Default::default() })
+        .get_with_opts(
+            "doc1",
+            GetOptions {
+                conflicts: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     let remote_doc = remote
-        .get_with_opts("doc1", GetOptions { conflicts: true, ..Default::default() })
+        .get_with_opts(
+            "doc1",
+            GetOptions {
+                conflicts: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
@@ -67,7 +90,10 @@ async fn conflict_local_delete_remote_update() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let rev = r1.rev.unwrap();
     local.replicate_to(&remote).await.unwrap();
 
@@ -84,7 +110,10 @@ async fn conflict_local_delete_remote_update() {
     assert_eq!(remote_doc.data["v"], 2, "Non-deleted revision should win");
 
     let local_doc = local.get("doc1").await.unwrap();
-    assert_eq!(local_doc.data["v"], 2, "Local should agree with remote winner");
+    assert_eq!(
+        local_doc.data["v"], 2,
+        "Local should agree with remote winner"
+    );
 
     delete_remote_db(&url).await;
 }
@@ -96,7 +125,10 @@ async fn conflict_remote_delete_local_update() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let rev = r1.rev.unwrap();
     local.replicate_to(&remote).await.unwrap();
 
@@ -125,7 +157,10 @@ async fn conflict_three_way() {
     let local2 = Database::memory("local2");
     let remote = Database::http(&url);
 
-    let r1 = local1.put("doc1", serde_json::json!({"v": "original"})).await.unwrap();
+    let r1 = local1
+        .put("doc1", serde_json::json!({"v": "original"}))
+        .await
+        .unwrap();
     let rev = r1.rev.unwrap();
     local1.replicate_to(&remote).await.unwrap();
     local2.replicate_from(&remote).await.unwrap();
@@ -171,20 +206,37 @@ async fn conflict_resolve_by_update() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let rev = r1.rev.unwrap();
     local.replicate_to(&remote).await.unwrap();
 
-    local.update("doc1", &rev, serde_json::json!({"v": "local"})).await.unwrap();
-    remote.update("doc1", &rev, serde_json::json!({"v": "remote"})).await.unwrap();
+    local
+        .update("doc1", &rev, serde_json::json!({"v": "local"}))
+        .await
+        .unwrap();
+    remote
+        .update("doc1", &rev, serde_json::json!({"v": "remote"}))
+        .await
+        .unwrap();
 
     local.sync(&remote).await.unwrap();
 
     let doc = local
-        .get_with_opts("doc1", GetOptions { conflicts: true, ..Default::default() })
+        .get_with_opts(
+            "doc1",
+            GetOptions {
+                conflicts: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
-    let conflicts = doc.data.get("_conflicts")
+    let conflicts = doc
+        .data
+        .get("_conflicts")
         .and_then(|c| c.as_array())
         .expect("Should have conflicts");
     assert!(!conflicts.is_empty());

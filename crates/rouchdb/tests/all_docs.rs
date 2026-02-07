@@ -11,8 +11,12 @@ async fn all_docs_include_docs() {
     let url = fresh_remote_db("ad_incdocs").await;
     let db = Database::http(&url);
 
-    db.put("doc1", serde_json::json!({"name": "Alice"})).await.unwrap();
-    db.put("doc2", serde_json::json!({"name": "Bob"})).await.unwrap();
+    db.put("doc1", serde_json::json!({"name": "Alice"}))
+        .await
+        .unwrap();
+    db.put("doc2", serde_json::json!({"name": "Bob"}))
+        .await
+        .unwrap();
 
     let result = db
         .all_docs(AllDocsOptions {

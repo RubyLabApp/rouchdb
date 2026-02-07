@@ -526,13 +526,16 @@ mod tests {
     #[test]
     fn to_json_with_attachments() {
         let mut attachments = HashMap::new();
-        attachments.insert("file.txt".into(), AttachmentMeta {
-            content_type: "text/plain".into(),
-            digest: "md5-abc".into(),
-            length: 100,
-            stub: true,
-            data: None,
-        });
+        attachments.insert(
+            "file.txt".into(),
+            AttachmentMeta {
+                content_type: "text/plain".into(),
+                digest: "md5-abc".into(),
+                length: 100,
+                stub: true,
+                data: None,
+            },
+        );
         let doc = Document {
             id: "doc1".into(),
             rev: None,
@@ -542,7 +545,10 @@ mod tests {
         };
         let json = doc.to_json();
         assert!(json["_attachments"]["file.txt"].is_object());
-        assert_eq!(json["_attachments"]["file.txt"]["content_type"], "text/plain");
+        assert_eq!(
+            json["_attachments"]["file.txt"]["content_type"],
+            "text/plain"
+        );
     }
 
     #[test]

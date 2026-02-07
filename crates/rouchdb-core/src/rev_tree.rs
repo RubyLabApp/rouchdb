@@ -6,7 +6,6 @@
 ///
 /// Multiple roots arise when revisions are stemmed (pruned) and later a
 /// previously-stemmed branch is re-introduced during replication.
-
 /// Status of a revision's stored data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RevStatus {
@@ -112,7 +111,9 @@ pub fn collect_leaves(tree: &RevTree) -> Vec<LeafInfo> {
 }
 
 /// Decompose the tree into all root-to-leaf paths.
-pub fn root_to_leaf(tree: &RevTree) -> Vec<(u64, Vec<(String, NodeOpts, RevStatus)>)> {
+type LeafPath = (u64, Vec<(String, NodeOpts, RevStatus)>);
+
+pub fn root_to_leaf(tree: &RevTree) -> Vec<LeafPath> {
     let mut paths = Vec::new();
     for path in tree {
         fn walk(
@@ -206,7 +207,11 @@ pub fn build_path_from_revs(
 ///
 /// Returns hashes from leaf to root: `[target_hash, parent_hash, grandparent_hash, ...]`
 /// or `None` if the revision is not found in the tree.
-pub fn find_rev_ancestry(tree: &RevTree, target_pos: u64, target_hash: &str) -> Option<Vec<String>> {
+pub fn find_rev_ancestry(
+    tree: &RevTree,
+    target_pos: u64,
+    target_hash: &str,
+) -> Option<Vec<String>> {
     for path in tree {
         if let Some(chain) = find_chain_in_node(&path.tree, path.pos, target_pos, target_hash) {
             return Some(chain);

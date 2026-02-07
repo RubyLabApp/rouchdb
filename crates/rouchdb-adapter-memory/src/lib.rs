@@ -11,8 +11,8 @@ use rouchdb_core::document::*;
 use rouchdb_core::error::{Result, RouchError};
 use rouchdb_core::merge::{collect_conflicts, is_deleted, merge_tree, winning_rev};
 use rouchdb_core::rev_tree::{
-    build_path_from_revs, collect_leaves, find_rev_ancestry, rev_exists, NodeOpts, RevPath,
-    RevStatus, RevTree,
+    NodeOpts, RevPath, RevStatus, RevTree, build_path_from_revs, collect_leaves, find_rev_ancestry,
+    rev_exists,
 };
 
 const DEFAULT_REV_LIMIT: u64 = 1000;
@@ -73,7 +73,11 @@ impl MemoryAdapter {
 // ---------------------------------------------------------------------------
 
 /// Generate a revision hash from the document content.
-fn generate_rev_hash(doc_data: &serde_json::Value, deleted: bool, prev_rev: Option<&str>) -> String {
+fn generate_rev_hash(
+    doc_data: &serde_json::Value,
+    deleted: bool,
+    prev_rev: Option<&str>,
+) -> String {
     let mut hasher = Md5::new();
     // Include the previous revision in the hash for determinism
     if let Some(prev) = prev_rev {
@@ -156,7 +160,11 @@ impl Adapter for MemoryAdapter {
             .cloned()
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-        let deleted = stored.rev_deleted.get(&target_rev).copied().unwrap_or(false);
+        let deleted = stored
+            .rev_deleted
+            .get(&target_rev)
+            .copied()
+            .unwrap_or(false);
 
         // If the winning rev is deleted and no specific rev was requested, it's "not found"
         if deleted && opts.rev.is_none() {
@@ -239,12 +247,11 @@ impl Adapter for MemoryAdapter {
         for key in &target_keys {
             // Apply key range filters if no specific keys were given
             if opts.keys.is_none() && opts.key.is_none() {
-                if let Some(ref start) = opts.start_key {
-                    if (!opts.descending && key.as_str() < start.as_str())
-                        || (opts.descending && key.as_str() > start.as_str())
-                    {
-                        continue;
-                    }
+                if let Some(ref start) = opts.start_key
+                    && ((!opts.descending && key.as_str() < start.as_str())
+                        || (opts.descending && key.as_str() > start.as_str()))
+                {
+                    continue;
                 }
                 if let Some(ref end) = opts.end_key {
                     if opts.inclusive_end {
@@ -280,14 +287,8 @@ impl Adapter for MemoryAdapter {
                             serde_json::Value::Object(m) => m.clone(),
                             _ => serde_json::Map::new(),
                         };
-                        obj.insert(
-                            "_id".into(),
-                            serde_json::Value::String(key.clone()),
-                        );
-                        obj.insert(
-                            "_rev".into(),
-                            serde_json::Value::String(rev_str),
-                        );
+                        obj.insert("_id".into(), serde_json::Value::String(key.clone()));
+                        obj.insert("_rev".into(), serde_json::Value::String(rev_str));
                         serde_json::Value::Object(obj)
                     })
                 } else {
@@ -349,10 +350,10 @@ impl Adapter for MemoryAdapter {
 
         for (seq, (doc_id, deleted)) in iter {
             // Filter by doc_ids if specified
-            if let Some(ref doc_ids) = opts.doc_ids {
-                if !doc_ids.contains(doc_id) {
-                    continue;
-                }
+            if let Some(ref doc_ids) = opts.doc_ids
+                && !doc_ids.contains(doc_id)
+            {
+                continue;
             }
 
             let stored = inner.docs.get(doc_id);
@@ -368,14 +369,8 @@ impl Adapter for MemoryAdapter {
                             serde_json::Value::Object(m) => m.clone(),
                             _ => serde_json::Map::new(),
                         };
-                        obj.insert(
-                            "_id".into(),
-                            serde_json::Value::String(doc_id.clone()),
-                        );
-                        obj.insert(
-                            "_rev".into(),
-                            serde_json::Value::String(rev_str.clone()),
-                        );
+                        obj.insert("_id".into(), serde_json::Value::String(doc_id.clone()));
+                        obj.insert("_rev".into(), serde_json::Value::String(rev_str.clone()));
                         if *deleted {
                             obj.insert("_deleted".into(), serde_json::Value::Bool(true));
                         }
@@ -389,32 +384,27 @@ impl Adapter for MemoryAdapter {
             results.push(ChangeEvent {
                 seq: Seq::Num(*seq),
                 id: doc_id.clone(),
-                changes: vec![ChangeRev {
-                    rev: rev_str,
-                }],
+                changes: vec![ChangeRev { rev: rev_str }],
                 deleted: *deleted,
                 doc,
             });
 
-            if let Some(limit) = opts.limit {
-                if results.len() >= limit as usize {
-                    break;
-                }
+            if let Some(limit) = opts.limit
+                && results.len() >= limit as usize
+            {
+                break;
             }
         }
 
-        let last_seq = results.last().map(|r| r.seq.clone()).unwrap_or(opts.since.clone());
+        let last_seq = results
+            .last()
+            .map(|r| r.seq.clone())
+            .unwrap_or(opts.since.clone());
 
-        Ok(ChangesResponse {
-            results,
-            last_seq,
-        })
+        Ok(ChangesResponse { results, last_seq })
     }
 
-    async fn revs_diff(
-        &self,
-        revs: HashMap<String, Vec<String>>,
-    ) -> Result<RevsDiffResponse> {
+    async fn revs_diff(&self, revs: HashMap<String, Vec<String>>) -> Result<RevsDiffResponse> {
         let inner = self.inner.read().await;
         let mut results = HashMap::new();
 
@@ -494,38 +484,28 @@ impl Adapter for MemoryAdapter {
                     };
 
                     if let Some(data) = stored.rev_data.get(&rev_str) {
-                        let deleted = stored
-                            .rev_deleted
-                            .get(&rev_str)
-                            .copied()
-                            .unwrap_or(false);
+                        let deleted = stored.rev_deleted.get(&rev_str).copied().unwrap_or(false);
                         let mut obj = match data {
                             serde_json::Value::Object(m) => m.clone(),
                             _ => serde_json::Map::new(),
                         };
-                        obj.insert(
-                            "_id".into(),
-                            serde_json::Value::String(item.id.clone()),
-                        );
-                        obj.insert(
-                            "_rev".into(),
-                            serde_json::Value::String(rev_str.clone()),
-                        );
+                        obj.insert("_id".into(), serde_json::Value::String(item.id.clone()));
+                        obj.insert("_rev".into(), serde_json::Value::String(rev_str.clone()));
                         if deleted {
                             obj.insert("_deleted".into(), serde_json::Value::Bool(true));
                         }
 
                         // Include _revisions for replication
-                        if let Ok((pos, ref hash)) = parse_rev(&rev_str) {
-                            if let Some(ancestry) = find_rev_ancestry(&stored.rev_tree, pos, hash) {
-                                obj.insert(
-                                    "_revisions".into(),
-                                    serde_json::json!({
-                                        "start": pos,
-                                        "ids": ancestry
-                                    }),
-                                );
-                            }
+                        if let Ok((pos, ref hash)) = parse_rev(&rev_str)
+                            && let Some(ancestry) = find_rev_ancestry(&stored.rev_tree, pos, hash)
+                        {
+                            obj.insert(
+                                "_revisions".into(),
+                                serde_json::json!({
+                                    "start": pos,
+                                    "ids": ancestry
+                                }),
+                            );
                         }
 
                         bulk_docs.push(BulkGetDoc {
@@ -771,11 +751,7 @@ fn process_doc_new_edits(inner: &mut Inner, doc: Document) -> DocResult {
     // Generate new revision
     let new_pos = doc.rev.as_ref().map(|r| r.pos + 1).unwrap_or(1);
     let prev_rev_str = doc.rev.as_ref().map(|r| r.to_string());
-    let new_hash = generate_rev_hash(
-        &doc.data,
-        doc.deleted,
-        prev_rev_str.as_deref(),
-    );
+    let new_hash = generate_rev_hash(&doc.data, doc.deleted, prev_rev_str.as_deref());
     let new_rev_str = rev_string(new_pos, &new_hash);
 
     // Build the revision path for merging
@@ -794,9 +770,7 @@ fn process_doc_new_edits(inner: &mut Inner, doc: Document) -> DocResult {
     );
 
     // Merge into existing tree or create new one
-    let existing_tree = existing
-        .map(|s| s.rev_tree.clone())
-        .unwrap_or_default();
+    let existing_tree = existing.map(|s| s.rev_tree.clone()).unwrap_or_default();
 
     let (merged_tree, _merge_result) = merge_tree(&existing_tree, &new_path, DEFAULT_REV_LIMIT);
 
@@ -810,12 +784,15 @@ fn process_doc_new_edits(inner: &mut Inner, doc: Document) -> DocResult {
     }
 
     // Store or update the document
-    let stored = inner.docs.entry(doc_id.clone()).or_insert_with(|| StoredDoc {
-        rev_tree: Vec::new(),
-        rev_data: HashMap::new(),
-        rev_deleted: HashMap::new(),
-        seq: 0,
-    });
+    let stored = inner
+        .docs
+        .entry(doc_id.clone())
+        .or_insert_with(|| StoredDoc {
+            rev_tree: Vec::new(),
+            rev_data: HashMap::new(),
+            rev_deleted: HashMap::new(),
+            seq: 0,
+        });
 
     stored.rev_tree = merged_tree;
     stored.rev_data.insert(new_rev_str.clone(), doc.data);
@@ -915,12 +892,15 @@ fn process_doc_replication(inner: &mut Inner, mut doc: Document) -> DocResult {
 
     let is_doc_deleted = is_deleted(&merged_tree);
 
-    let stored = inner.docs.entry(doc_id.clone()).or_insert_with(|| StoredDoc {
-        rev_tree: Vec::new(),
-        rev_data: HashMap::new(),
-        rev_deleted: HashMap::new(),
-        seq: 0,
-    });
+    let stored = inner
+        .docs
+        .entry(doc_id.clone())
+        .or_insert_with(|| StoredDoc {
+            rev_tree: Vec::new(),
+            rev_data: HashMap::new(),
+            rev_deleted: HashMap::new(),
+            seq: 0,
+        });
 
     stored.rev_tree = merged_tree;
     stored.rev_data.insert(rev_str.clone(), doc.data);
@@ -998,7 +978,10 @@ mod tests {
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         let rev1 = results[0].rev.clone().unwrap();
 
         // Update
@@ -1010,7 +993,10 @@ mod tests {
             data: serde_json::json!({"name": "Bob"}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc2], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc2], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(results[0].ok);
 
         let fetched = db.get("doc1", GetOptions::default()).await.unwrap();
@@ -1028,7 +1014,9 @@ mod tests {
             data: serde_json::json!({"v": 1}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
         // Try updating with wrong rev
         let doc2 = Document {
@@ -1038,7 +1026,10 @@ mod tests {
             data: serde_json::json!({"v": 2}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc2], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc2], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(!results[0].ok);
         assert_eq!(results[0].error.as_deref(), Some("conflict"));
     }
@@ -1054,7 +1045,10 @@ mod tests {
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         let rev1: Revision = results[0].rev.clone().unwrap().parse().unwrap();
 
         // Delete
@@ -1065,7 +1059,10 @@ mod tests {
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![del], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![del], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(results[0].ok);
 
         // Get should fail
@@ -1089,7 +1086,9 @@ mod tests {
                 data: serde_json::json!({"name": name}),
                 attachments: HashMap::new(),
             };
-            db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+            db.bulk_docs(vec![doc], BulkDocsOptions::new())
+                .await
+                .unwrap();
         }
 
         let result = db.all_docs(AllDocsOptions::new()).await.unwrap();
@@ -1111,7 +1110,9 @@ mod tests {
             data: serde_json::json!({"name": "Alice"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
         let mut opts = AllDocsOptions::new();
         opts.include_docs = true;
@@ -1134,13 +1135,12 @@ mod tests {
                 data: serde_json::json!({"i": i}),
                 attachments: HashMap::new(),
             };
-            db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+            db.bulk_docs(vec![doc], BulkDocsOptions::new())
+                .await
+                .unwrap();
         }
 
-        let changes = db
-            .changes(ChangesOptions::default())
-            .await
-            .unwrap();
+        let changes = db.changes(ChangesOptions::default()).await.unwrap();
         assert_eq!(changes.results.len(), 3);
         assert_eq!(changes.last_seq, Seq::Num(3));
 
@@ -1167,7 +1167,10 @@ mod tests {
             data: serde_json::json!({"v": 1}),
             attachments: HashMap::new(),
         };
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         let existing_rev = results[0].rev.clone().unwrap();
 
         let mut revs = HashMap::new();
@@ -1239,7 +1242,10 @@ mod tests {
             attachments: HashMap::new(),
         };
 
-        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let results = db
+            .bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         assert!(results[0].ok);
         assert!(!results[0].id.is_empty());
     }
@@ -1255,7 +1261,9 @@ mod tests {
             data: serde_json::json!({}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
         db.put_local("x", serde_json::json!({})).await.unwrap();
 
         db.destroy().await.unwrap();
@@ -1276,12 +1284,20 @@ mod tests {
             data: serde_json::json!({"name": "test"}),
             attachments: HashMap::new(),
         };
-        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        db.bulk_docs(vec![doc], BulkDocsOptions::new())
+            .await
+            .unwrap();
 
         let result = db
             .bulk_get(vec![
-                BulkGetItem { id: "doc1".into(), rev: None },
-                BulkGetItem { id: "missing".into(), rev: None },
+                BulkGetItem {
+                    id: "doc1".into(),
+                    rev: None,
+                },
+                BulkGetItem {
+                    id: "missing".into(),
+                    rev: None,
+                },
             ])
             .await
             .unwrap();

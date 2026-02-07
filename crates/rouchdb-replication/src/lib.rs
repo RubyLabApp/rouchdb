@@ -8,9 +8,8 @@
 /// 5. Fetch missing documents from source
 /// 6. Write to target with new_edits=false
 /// 7. Save checkpoint to both sides
-
 mod checkpoint;
 mod protocol;
 
 pub use checkpoint::Checkpointer;
-pub use protocol::{replicate, ReplicationOptions, ReplicationResult, ReplicationEvent};
+pub use protocol::{ReplicationEvent, ReplicationOptions, ReplicationResult, replicate};

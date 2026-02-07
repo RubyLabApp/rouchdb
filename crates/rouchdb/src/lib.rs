@@ -46,12 +46,12 @@ pub use rouchdb_adapter_memory::MemoryAdapter;
 pub use rouchdb_adapter_redb::RedbAdapter;
 
 // Re-export subsystems
-pub use rouchdb_changes::{ChangeSender, ChangeReceiver, LiveChangesStream};
+pub use rouchdb_changes::{ChangeReceiver, ChangeSender, LiveChangesStream};
 pub use rouchdb_query::{
-    find, matches_selector, query_view, FindOptions, FindResponse, ReduceFn, SortField,
-    ViewQueryOptions, ViewResult,
+    FindOptions, FindResponse, ReduceFn, SortField, ViewQueryOptions, ViewResult, find,
+    matches_selector, query_view,
 };
-pub use rouchdb_replication::{replicate, ReplicationOptions, ReplicationResult, ReplicationEvent};
+pub use rouchdb_replication::{ReplicationEvent, ReplicationOptions, ReplicationResult, replicate};
 
 /// A high-level database handle that wraps any adapter implementation.
 ///
@@ -117,11 +117,7 @@ impl Database {
     /// If the document doesn't exist, creates it.
     /// If it does exist, you must provide the current `_rev` in `opts_rev`
     /// to avoid conflicts.
-    pub async fn put(
-        &self,
-        id: &str,
-        data: serde_json::Value,
-    ) -> Result<DocResult> {
+    pub async fn put(&self, id: &str, data: serde_json::Value) -> Result<DocResult> {
         let doc = Document {
             id: id.to_string(),
             rev: None,
@@ -137,12 +133,7 @@ impl Database {
     }
 
     /// Update an existing document (requires providing the current rev).
-    pub async fn update(
-        &self,
-        id: &str,
-        rev: &str,
-        data: serde_json::Value,
-    ) -> Result<DocResult> {
+    pub async fn update(&self, id: &str, rev: &str, data: serde_json::Value) -> Result<DocResult> {
         let revision: Revision = rev.parse()?;
         let doc = Document {
             id: id.to_string(),
@@ -270,7 +261,10 @@ mod tests {
     async fn database_put_and_get() {
         let db = Database::memory("test");
 
-        let result = db.put("doc1", serde_json::json!({"name": "Alice"})).await.unwrap();
+        let result = db
+            .put("doc1", serde_json::json!({"name": "Alice"}))
+            .await
+            .unwrap();
         assert!(result.ok);
         assert_eq!(result.id, "doc1");
 
@@ -285,7 +279,10 @@ mod tests {
         let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
         let rev = r1.rev.unwrap();
 
-        let r2 = db.update("doc1", &rev, serde_json::json!({"v": 2})).await.unwrap();
+        let r2 = db
+            .update("doc1", &rev, serde_json::json!({"v": 2}))
+            .await
+            .unwrap();
         assert!(r2.ok);
 
         let doc = db.get("doc1").await.unwrap();
@@ -309,8 +306,12 @@ mod tests {
     #[tokio::test]
     async fn database_find() {
         let db = Database::memory("test");
-        db.put("alice", serde_json::json!({"name": "Alice", "age": 30})).await.unwrap();
-        db.put("bob", serde_json::json!({"name": "Bob", "age": 25})).await.unwrap();
+        db.put("alice", serde_json::json!({"name": "Alice", "age": 30}))
+            .await
+            .unwrap();
+        db.put("bob", serde_json::json!({"name": "Bob", "age": 25}))
+            .await
+            .unwrap();
 
         let result = db
             .find(FindOptions {
@@ -329,8 +330,14 @@ mod tests {
         let local = Database::memory("local");
         let remote = Database::memory("remote");
 
-        local.put("doc1", serde_json::json!({"from": "local"})).await.unwrap();
-        remote.put("doc2", serde_json::json!({"from": "remote"})).await.unwrap();
+        local
+            .put("doc1", serde_json::json!({"from": "local"}))
+            .await
+            .unwrap();
+        remote
+            .put("doc2", serde_json::json!({"from": "remote"}))
+            .await
+            .unwrap();
 
         let (push, pull) = local.sync(&remote).await.unwrap();
         assert!(push.ok);
@@ -382,10 +389,16 @@ mod tests {
         let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
         let rev = r1.rev.unwrap();
 
-        let doc = db.get_with_opts("doc1", GetOptions {
-            rev: Some(rev),
-            ..Default::default()
-        }).await.unwrap();
+        let doc = db
+            .get_with_opts(
+                "doc1",
+                GetOptions {
+                    rev: Some(rev),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(doc.data["v"], 1);
     }
 
@@ -395,12 +408,16 @@ mod tests {
 
         let docs = vec![
             Document {
-                id: "a".into(), rev: None, deleted: false,
+                id: "a".into(),
+                rev: None,
+                deleted: false,
                 data: serde_json::json!({"x": 1}),
                 attachments: std::collections::HashMap::new(),
             },
             Document {
-                id: "b".into(), rev: None, deleted: false,
+                id: "b".into(),
+                rev: None,
+                deleted: false,
                 data: serde_json::json!({"x": 2}),
                 attachments: std::collections::HashMap::new(),
             },
@@ -436,12 +453,21 @@ mod tests {
         let local = Database::memory("local");
         let remote = Database::memory("remote");
 
-        local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+        local
+            .put("doc1", serde_json::json!({"v": 1}))
+            .await
+            .unwrap();
 
-        let result = local.replicate_to_with_opts(
-            &remote,
-            ReplicationOptions { batch_size: 1, batches_limit: 10 },
-        ).await.unwrap();
+        let result = local
+            .replicate_to_with_opts(
+                &remote,
+                ReplicationOptions {
+                    batch_size: 1,
+                    batches_limit: 10,
+                },
+            )
+            .await
+            .unwrap();
         assert!(result.ok);
 
         let doc = remote.get("doc1").await.unwrap();

@@ -287,7 +287,12 @@ mod tests {
 
         // Create more docs than batch size
         for i in 0..15 {
-            put_doc(&source, &format!("doc{:03}", i), serde_json::json!({"i": i})).await;
+            put_doc(
+                &source,
+                &format!("doc{:03}", i),
+                serde_json::json!({"i": i}),
+            )
+            .await;
         }
 
         let result = replicate(

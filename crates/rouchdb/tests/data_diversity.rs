@@ -108,7 +108,7 @@ async fn data_numeric_types_roundtrip() {
         "integer": 42,
         "negative": -7,
         "zero": 0,
-        "float": 3.14159,
+        "float": 3.14160,
         "small_float": 0.001,
         "negative_float": -273.15,
         "big": 9999999999_i64
@@ -121,7 +121,7 @@ async fn data_numeric_types_roundtrip() {
     assert_eq!(doc.data["integer"], 42);
     assert_eq!(doc.data["negative"], -7);
     assert_eq!(doc.data["zero"], 0);
-    assert!((doc.data["float"].as_f64().unwrap() - 3.14159).abs() < 1e-10);
+    assert!((doc.data["float"].as_f64().unwrap() - 3.14160).abs() < 1e-10);
     assert_eq!(doc.data["small_float"], 0.001);
     assert_eq!(doc.data["negative_float"], -273.15);
     assert_eq!(doc.data["big"], 9999999999_i64);
@@ -204,7 +204,10 @@ async fn data_unicode_roundtrip() {
     let doc = remote.get("doc1").await.unwrap();
     assert_eq!(doc.data["emoji"], "\u{1F980}\u{1F389}");
     assert_eq!(doc.data["japanese"], "\u{6771}\u{4EAC}");
-    assert_eq!(doc.data["accented"], "caf\u{00E9} na\u{00EF}ve r\u{00E9}sum\u{00E9}");
+    assert_eq!(
+        doc.data["accented"],
+        "caf\u{00E9} na\u{00EF}ve r\u{00E9}sum\u{00E9}"
+    );
     assert_eq!(doc.data["special_chars"], "line1\nline2\ttab\\backslash");
 
     delete_remote_db(&url).await;
@@ -219,11 +222,14 @@ async fn data_large_document() {
 
     let mut obj = serde_json::Map::new();
     for i in 0..100 {
-        obj.insert(format!("field_{}", i), serde_json::json!({
-            "index": i,
-            "value": format!("value_{}", i),
-            "nested": {"depth": 1, "data": [i, i*2, i*3]}
-        }));
+        obj.insert(
+            format!("field_{}", i),
+            serde_json::json!({
+                "index": i,
+                "value": format!("value_{}", i),
+                "nested": {"depth": 1, "data": [i, i*2, i*3]}
+            }),
+        );
     }
     let data = serde_json::Value::Object(obj);
 
@@ -248,7 +254,9 @@ async fn special_id_with_spaces() {
     let url = fresh_remote_db("id_spaces").await;
     let db = Database::http(&url);
 
-    db.put("my document", serde_json::json!({"v": 1})).await.unwrap();
+    db.put("my document", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let doc = db.get("my document").await.unwrap();
     assert_eq!(doc.data["v"], 1);
     assert_eq!(doc.id, "my document");
@@ -262,7 +270,9 @@ async fn special_id_with_unicode() {
     let url = fresh_remote_db("id_unicode").await;
     let db = Database::http(&url);
 
-    db.put("doc_\u{00E9}\u{00E8}\u{00EA}", serde_json::json!({"v": 1})).await.unwrap();
+    db.put("doc_\u{00E9}\u{00E8}\u{00EA}", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let doc = db.get("doc_\u{00E9}\u{00E8}\u{00EA}").await.unwrap();
     assert_eq!(doc.data["v"], 1);
 
@@ -276,10 +286,22 @@ async fn special_id_replicate_roundtrip() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("has spaces", serde_json::json!({"t": "spaces"})).await.unwrap();
-    local.put("has/slash", serde_json::json!({"t": "slash"})).await.unwrap();
-    local.put("has+plus", serde_json::json!({"t": "plus"})).await.unwrap();
-    local.put("has?question", serde_json::json!({"t": "question"})).await.unwrap();
+    local
+        .put("has spaces", serde_json::json!({"t": "spaces"}))
+        .await
+        .unwrap();
+    local
+        .put("has/slash", serde_json::json!({"t": "slash"}))
+        .await
+        .unwrap();
+    local
+        .put("has+plus", serde_json::json!({"t": "plus"}))
+        .await
+        .unwrap();
+    local
+        .put("has?question", serde_json::json!({"t": "question"}))
+        .await
+        .unwrap();
 
     local.replicate_to(&remote).await.unwrap();
 

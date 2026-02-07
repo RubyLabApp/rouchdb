@@ -28,6 +28,7 @@ pub enum ReduceFn {
     /// Compute statistics (sum, count, min, max, sumsqr).
     Stats,
     /// Custom reduce function.
+    #[allow(clippy::type_complexity)]
     Custom(Box<dyn Fn(&[serde_json::Value], &[serde_json::Value], bool) -> serde_json::Value>),
 }
 
@@ -136,29 +137,28 @@ pub async fn query_view(
     let total_rows = emitted.len() as u64;
 
     // Reduce
-    if opts.reduce {
-        if let Some(reduce) = reduce_fn {
-            let rows = if opts.group || opts.group_level.is_some() {
-                group_reduce(&emitted, reduce, opts.group_level)
-            } else {
-                let keys: Vec<serde_json::Value> = emitted.iter().map(|r| r.key.clone()).collect();
-                let values: Vec<serde_json::Value> =
-                    emitted.iter().map(|r| r.value.clone()).collect();
-                let result = apply_reduce(reduce, &keys, &values, false);
-                vec![ViewRow {
-                    id: None,
-                    key: serde_json::Value::Null,
-                    value: result,
-                    doc: None,
-                }]
-            };
+    if opts.reduce
+        && let Some(reduce) = reduce_fn
+    {
+        let rows = if opts.group || opts.group_level.is_some() {
+            group_reduce(&emitted, reduce, opts.group_level)
+        } else {
+            let keys: Vec<serde_json::Value> = emitted.iter().map(|r| r.key.clone()).collect();
+            let values: Vec<serde_json::Value> = emitted.iter().map(|r| r.value.clone()).collect();
+            let result = apply_reduce(reduce, &keys, &values, false);
+            vec![ViewRow {
+                id: None,
+                key: serde_json::Value::Null,
+                value: result,
+                doc: None,
+            }]
+        };
 
-            return Ok(ViewResult {
-                total_rows: rows.len() as u64,
-                offset: 0,
-                rows,
-            });
-        }
+        return Ok(ViewResult {
+            total_rows: rows.len() as u64,
+            offset: 0,
+            rows,
+        });
     }
 
     // Apply skip and limit
@@ -226,11 +226,7 @@ fn filter_by_range(rows: Vec<EmittedRow>, opts: &ViewQueryOptions) -> Vec<Emitte
         .collect()
 }
 
-fn group_reduce(
-    rows: &[EmittedRow],
-    reduce: &ReduceFn,
-    group_level: Option<u64>,
-) -> Vec<ViewRow> {
+fn group_reduce(rows: &[EmittedRow], reduce: &ReduceFn, group_level: Option<u64>) -> Vec<ViewRow> {
     if rows.is_empty() {
         return vec![];
     }
@@ -296,10 +292,7 @@ fn apply_reduce(
 ) -> serde_json::Value {
     match reduce {
         ReduceFn::Sum => {
-            let sum: f64 = values
-                .iter()
-                .filter_map(|v| v.as_f64())
-                .sum();
+            let sum: f64 = values.iter().filter_map(|v| v.as_f64()).sum();
             serde_json::json!(sum)
         }
         ReduceFn::Count => {

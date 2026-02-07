@@ -16,9 +16,18 @@ async fn replicate_memory_to_couchdb() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"name": "Alice"})).await.unwrap();
-    local.put("doc2", serde_json::json!({"name": "Bob"})).await.unwrap();
-    local.put("doc3", serde_json::json!({"name": "Charlie"})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"name": "Alice"}))
+        .await
+        .unwrap();
+    local
+        .put("doc2", serde_json::json!({"name": "Bob"}))
+        .await
+        .unwrap();
+    local
+        .put("doc3", serde_json::json!({"name": "Charlie"}))
+        .await
+        .unwrap();
 
     let result = local.replicate_to(&remote).await.unwrap();
     assert!(result.ok);
@@ -40,8 +49,14 @@ async fn replicate_couchdb_to_memory() {
     let remote = Database::http(&url);
     let local = Database::memory("local");
 
-    remote.put("doc1", serde_json::json!({"city": "NYC"})).await.unwrap();
-    remote.put("doc2", serde_json::json!({"city": "LA"})).await.unwrap();
+    remote
+        .put("doc1", serde_json::json!({"city": "NYC"}))
+        .await
+        .unwrap();
+    remote
+        .put("doc2", serde_json::json!({"city": "LA"}))
+        .await
+        .unwrap();
 
     let result = local.replicate_from(&remote).await.unwrap();
     assert!(result.ok);
@@ -60,8 +75,14 @@ async fn bidirectional_sync_with_couchdb() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("local_doc", serde_json::json!({"from": "local"})).await.unwrap();
-    remote.put("remote_doc", serde_json::json!({"from": "remote"})).await.unwrap();
+    local
+        .put("local_doc", serde_json::json!({"from": "local"}))
+        .await
+        .unwrap();
+    remote
+        .put("remote_doc", serde_json::json!({"from": "remote"}))
+        .await
+        .unwrap();
 
     let (push, pull) = local.sync(&remote).await.unwrap();
     assert!(push.ok);
@@ -80,12 +101,21 @@ async fn incremental_replication_to_couchdb() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let r1 = local.replicate_to(&remote).await.unwrap();
     assert_eq!(r1.docs_written, 1);
 
-    local.put("doc2", serde_json::json!({"v": 2})).await.unwrap();
-    local.put("doc3", serde_json::json!({"v": 3})).await.unwrap();
+    local
+        .put("doc2", serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
+    local
+        .put("doc3", serde_json::json!({"v": 3}))
+        .await
+        .unwrap();
     let r2 = local.replicate_to(&remote).await.unwrap();
     assert_eq!(r2.docs_read, 2);
     assert_eq!(r2.docs_written, 2);
@@ -103,7 +133,10 @@ async fn replicate_deletes_to_couchdb() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
 
     local.remove("doc1", &r1.rev.unwrap()).await.unwrap();
@@ -124,7 +157,10 @@ async fn replicate_updates_to_couchdb() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
 
     local
@@ -149,10 +185,7 @@ async fn batched_replication_to_couchdb() {
 
     for i in 0..25 {
         local
-            .put(
-                &format!("doc{:03}", i),
-                serde_json::json!({"i": i}),
-            )
+            .put(&format!("doc{:03}", i), serde_json::json!({"i": i}))
             .await
             .unwrap();
     }
@@ -184,7 +217,10 @@ async fn already_synced_noop() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
 
     let result = local.replicate_to(&remote).await.unwrap();
@@ -202,8 +238,14 @@ async fn replicate_memory_to_redb() {
     let memory = Database::memory("source");
     let redb = Database::open(&path, "target").unwrap();
 
-    memory.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
-    memory.put("doc2", serde_json::json!({"v": 2})).await.unwrap();
+    memory
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
+    memory
+        .put("doc2", serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
 
     let result = memory.replicate_to(&redb).await.unwrap();
     assert!(result.ok);
@@ -222,7 +264,10 @@ async fn replicate_redb_to_couchdb() {
     let local = Database::open(&path, "local").unwrap();
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"origin": "redb"})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"origin": "redb"}))
+        .await
+        .unwrap();
 
     let result = local.replicate_to(&remote).await.unwrap();
     assert!(result.ok);
@@ -241,9 +286,18 @@ async fn mango_query_against_couchdb_data() {
     let remote = Database::http(&url);
     let local = Database::memory("local");
 
-    remote.put("alice", serde_json::json!({"name": "Alice", "age": 30})).await.unwrap();
-    remote.put("bob", serde_json::json!({"name": "Bob", "age": 25})).await.unwrap();
-    remote.put("charlie", serde_json::json!({"name": "Charlie", "age": 35})).await.unwrap();
+    remote
+        .put("alice", serde_json::json!({"name": "Alice", "age": 30}))
+        .await
+        .unwrap();
+    remote
+        .put("bob", serde_json::json!({"name": "Bob", "age": 25}))
+        .await
+        .unwrap();
+    remote
+        .put("charlie", serde_json::json!({"name": "Charlie", "age": 35}))
+        .await
+        .unwrap();
 
     local.replicate_from(&remote).await.unwrap();
 
@@ -268,16 +322,28 @@ async fn multiple_sync_rounds() {
     let remote = Database::http(&url);
 
     // Round 1: local creates, syncs
-    local.put("doc1", serde_json::json!({"round": 1})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"round": 1}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     // Round 2: remote creates, syncs
-    remote.put("doc2", serde_json::json!({"round": 2})).await.unwrap();
+    remote
+        .put("doc2", serde_json::json!({"round": 2}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     // Round 3: both create, sync
-    local.put("doc3", serde_json::json!({"round": 3})).await.unwrap();
-    remote.put("doc4", serde_json::json!({"round": 4})).await.unwrap();
+    local
+        .put("doc3", serde_json::json!({"round": 3}))
+        .await
+        .unwrap();
+    remote
+        .put("doc4", serde_json::json!({"round": 4}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     let local_info = local.info().await.unwrap();
@@ -299,7 +365,10 @@ async fn replicate_multiple_updates_same_doc() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     let r2 = local
         .update("doc1", &r1.rev.unwrap(), serde_json::json!({"v": 2}))
         .await
@@ -330,7 +399,10 @@ async fn replicate_delete_and_recreate() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
     local.remove("doc1", &r1.rev.unwrap()).await.unwrap();
     local.replicate_to(&remote).await.unwrap();
@@ -343,7 +415,11 @@ async fn replicate_delete_and_recreate() {
     let tombstone_rev = &doc1_change.changes[0].rev;
 
     local
-        .update("doc1", tombstone_rev, serde_json::json!({"v": "resurrected"}))
+        .update(
+            "doc1",
+            tombstone_rev,
+            serde_json::json!({"v": "resurrected"}),
+        )
         .await
         .unwrap();
 
@@ -383,8 +459,14 @@ async fn replicate_couchdb_to_redb() {
     let path = dir.path().join("test.redb");
     let local = Database::open(&path, "local").unwrap();
 
-    remote.put("doc1", serde_json::json!({"source": "couchdb"})).await.unwrap();
-    remote.put("doc2", serde_json::json!({"source": "couchdb"})).await.unwrap();
+    remote
+        .put("doc1", serde_json::json!({"source": "couchdb"}))
+        .await
+        .unwrap();
+    remote
+        .put("doc2", serde_json::json!({"source": "couchdb"}))
+        .await
+        .unwrap();
 
     let result = local.replicate_from(&remote).await.unwrap();
     assert!(result.ok);
@@ -404,8 +486,13 @@ async fn replicate_redb_bidirectional_memory() {
     let redb = Database::open(&path, "redb").unwrap();
     let memory = Database::memory("mem");
 
-    redb.put("from_redb", serde_json::json!({"source": "redb"})).await.unwrap();
-    memory.put("from_mem", serde_json::json!({"source": "memory"})).await.unwrap();
+    redb.put("from_redb", serde_json::json!({"source": "redb"}))
+        .await
+        .unwrap();
+    memory
+        .put("from_mem", serde_json::json!({"source": "memory"}))
+        .await
+        .unwrap();
 
     let (push, pull) = redb.sync(&memory).await.unwrap();
     assert!(push.ok);
@@ -428,7 +515,10 @@ async fn replicate_single_doc_batches() {
     let remote = Database::http(&url);
 
     for i in 0..5 {
-        local.put(&format!("doc{}", i), serde_json::json!({"i": i})).await.unwrap();
+        local
+            .put(&format!("doc{}", i), serde_json::json!({"i": i}))
+            .await
+            .unwrap();
     }
 
     let result = local
@@ -459,7 +549,10 @@ async fn replicate_exact_batch_boundary() {
     let remote = Database::http(&url);
 
     for i in 0..10 {
-        local.put(&format!("doc{:02}", i), serde_json::json!({"i": i})).await.unwrap();
+        local
+            .put(&format!("doc{:02}", i), serde_json::json!({"i": i}))
+            .await
+            .unwrap();
     }
 
     let result = local
@@ -487,7 +580,10 @@ async fn replicate_large_batch() {
     let remote = Database::http(&url);
 
     for i in 0..200 {
-        local.put(&format!("doc{:04}", i), serde_json::json!({"i": i})).await.unwrap();
+        local
+            .put(&format!("doc{:04}", i), serde_json::json!({"i": i}))
+            .await
+            .unwrap();
     }
 
     let result = local.replicate_to(&remote).await.unwrap();
@@ -511,12 +607,18 @@ async fn replicate_remote_updates_back_to_local() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
 
     let remote_doc = remote.get("doc1").await.unwrap();
     let remote_rev = remote_doc.rev.unwrap().to_string();
-    remote.update("doc1", &remote_rev, serde_json::json!({"v": 2})).await.unwrap();
+    remote
+        .update("doc1", &remote_rev, serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
 
     local.replicate_from(&remote).await.unwrap();
 
@@ -533,7 +635,10 @@ async fn replicate_remote_deletes_back_to_local() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.replicate_to(&remote).await.unwrap();
 
     let remote_doc = remote.get("doc1").await.unwrap();
@@ -555,20 +660,32 @@ async fn sync_interleaved_updates() {
     let local = Database::memory("local");
     let remote = Database::http(&url);
 
-    let r1 = local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    let r1 = local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
-    let _r2 = local.update("doc1", &r1.rev.unwrap(), serde_json::json!({"v": 2})).await.unwrap();
+    let _r2 = local
+        .update("doc1", &r1.rev.unwrap(), serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     let remote_doc = remote.get("doc1").await.unwrap();
     let remote_rev = remote_doc.rev.unwrap().to_string();
-    remote.update("doc1", &remote_rev, serde_json::json!({"v": 3})).await.unwrap();
+    remote
+        .update("doc1", &remote_rev, serde_json::json!({"v": 3}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     let local_doc = local.get("doc1").await.unwrap();
     let local_rev = local_doc.rev.unwrap().to_string();
-    local.update("doc1", &local_rev, serde_json::json!({"v": 4})).await.unwrap();
+    local
+        .update("doc1", &local_rev, serde_json::json!({"v": 4}))
+        .await
+        .unwrap();
     local.sync(&remote).await.unwrap();
 
     let final_local = local.get("doc1").await.unwrap();
@@ -592,7 +709,10 @@ async fn sync_many_docs_diverse_operations() {
 
     let mut revs = Vec::new();
     for i in 0..10 {
-        let r = local.put(&format!("doc{:02}", i), serde_json::json!({"i": i})).await.unwrap();
+        let r = local
+            .put(&format!("doc{:02}", i), serde_json::json!({"i": i}))
+            .await
+            .unwrap();
         revs.push(r.rev.unwrap());
     }
     local.sync(&remote).await.unwrap();
@@ -600,14 +720,21 @@ async fn sync_many_docs_diverse_operations() {
     // Update even-numbered docs
     for i in (0..10).step_by(2) {
         local
-            .update(&format!("doc{:02}", i), &revs[i], serde_json::json!({"i": i, "updated": true}))
+            .update(
+                &format!("doc{:02}", i),
+                &revs[i],
+                serde_json::json!({"i": i, "updated": true}),
+            )
             .await
             .unwrap();
     }
 
     // Delete odd-numbered docs
     for i in (1..10).step_by(2) {
-        local.remove(&format!("doc{:02}", i), &revs[i]).await.unwrap();
+        local
+            .remove(&format!("doc{:02}", i), &revs[i])
+            .await
+            .unwrap();
     }
 
     local.sync(&remote).await.unwrap();

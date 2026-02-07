@@ -5,7 +5,6 @@
 /// - One-shot mode: fetch changes since a sequence and return
 /// - Live/continuous mode: keep polling for new changes
 /// - Filtering by document IDs
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -179,10 +178,10 @@ impl LiveChangesStream {
     pub async fn next_change(&mut self) -> Option<ChangeEvent> {
         loop {
             // Check limit
-            if let Some(limit) = self.opts.limit {
-                if self.count >= limit {
-                    return None;
-                }
+            if let Some(limit) = self.opts.limit
+                && self.count >= limit
+            {
+                return None;
             }
 
             match self.state {
@@ -218,9 +217,7 @@ impl LiveChangesStream {
                     // Wait for a notification or poll
                     if let Some(ref mut receiver) = self.receiver {
                         // Wait for broadcast notification
-                        if receiver.recv().await.is_none() {
-                            return None; // Channel closed
-                        }
+                        receiver.recv().await.as_ref()?;
                     } else {
                         // No broadcast channel, poll with interval
                         tokio::time::sleep(self.opts.poll_interval).await;
@@ -281,12 +278,9 @@ mod tests {
         put_doc(db.as_ref(), "a", serde_json::json!({"v": 1})).await;
         put_doc(db.as_ref(), "b", serde_json::json!({"v": 2})).await;
 
-        let events = get_changes(
-            db.as_ref(),
-            ChangesStreamOptions::default(),
-        )
-        .await
-        .unwrap();
+        let events = get_changes(db.as_ref(), ChangesStreamOptions::default())
+            .await
+            .unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, "a");
