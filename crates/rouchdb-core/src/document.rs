@@ -507,4 +507,110 @@ mod tests {
         let repl = BulkDocsOptions::replication();
         assert!(!repl.new_edits);
     }
+
+    #[test]
+    fn to_json_deleted_document() {
+        let doc = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(2, "def".into())),
+            deleted: true,
+            data: serde_json::json!({}),
+            attachments: HashMap::new(),
+        };
+        let json = doc.to_json();
+        assert_eq!(json["_deleted"], true);
+        assert_eq!(json["_id"], "doc1");
+        assert_eq!(json["_rev"], "2-def");
+    }
+
+    #[test]
+    fn to_json_with_attachments() {
+        let mut attachments = HashMap::new();
+        attachments.insert("file.txt".into(), AttachmentMeta {
+            content_type: "text/plain".into(),
+            digest: "md5-abc".into(),
+            length: 100,
+            stub: true,
+            data: None,
+        });
+        let doc = Document {
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
+            data: serde_json::json!({"key": "val"}),
+            attachments,
+        };
+        let json = doc.to_json();
+        assert!(json["_attachments"]["file.txt"].is_object());
+        assert_eq!(json["_attachments"]["file.txt"]["content_type"], "text/plain");
+    }
+
+    #[test]
+    fn to_json_non_object_data() {
+        let doc = Document {
+            id: "doc1".into(),
+            rev: None,
+            deleted: false,
+            data: serde_json::json!("just a string"),
+            attachments: HashMap::new(),
+        };
+        let json = doc.to_json();
+        assert_eq!(json["_id"], "doc1");
+    }
+
+    #[test]
+    fn document_from_json_with_deleted_and_attachments() {
+        let json = serde_json::json!({
+            "_id": "doc1",
+            "_rev": "1-abc",
+            "_deleted": true,
+            "_attachments": {
+                "photo.jpg": {
+                    "content_type": "image/jpeg",
+                    "digest": "md5-xyz",
+                    "length": 500,
+                    "stub": true
+                }
+            },
+            "name": "test"
+        });
+        let doc = Document::from_json(json).unwrap();
+        assert!(doc.deleted);
+        assert_eq!(doc.attachments.len(), 1);
+        assert_eq!(doc.attachments["photo.jpg"].content_type, "image/jpeg");
+    }
+
+    #[test]
+    fn document_from_json_not_object() {
+        let json = serde_json::json!("just a string");
+        assert!(Document::from_json(json).is_err());
+    }
+
+    #[test]
+    fn seq_str_as_num() {
+        let seq = Seq::Str("42-g1AAAABXeJzLY".into());
+        assert_eq!(seq.as_num(), 42);
+
+        let seq2 = Seq::Str("not-a-number".into());
+        assert_eq!(seq2.as_num(), 0);
+    }
+
+    #[test]
+    fn seq_to_query_string() {
+        assert_eq!(Seq::Num(5).to_query_string(), "5");
+        let opaque = "13-g1AAAABXeJzLY".to_string();
+        assert_eq!(Seq::Str(opaque.clone()).to_query_string(), opaque);
+    }
+
+    #[test]
+    fn seq_display() {
+        assert_eq!(format!("{}", Seq::Num(42)), "42");
+        assert_eq!(format!("{}", Seq::Str("opaque-seq".into())), "opaque-seq");
+    }
+
+    #[test]
+    fn seq_from_u64() {
+        let seq: Seq = 7u64.into();
+        assert_eq!(seq, Seq::Num(7));
+    }
 }

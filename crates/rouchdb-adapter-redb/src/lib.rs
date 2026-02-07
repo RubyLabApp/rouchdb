@@ -1168,4 +1168,259 @@ mod tests {
         assert_eq!(info.doc_count, 0);
         assert_eq!(info.update_seq, Seq::Num(0));
     }
+
+    #[tokio::test]
+    async fn all_docs_include_docs() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"name": "Alice"}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+
+        let result = db.all_docs(AllDocsOptions {
+            include_docs: true,
+            ..AllDocsOptions::new()
+        }).await.unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let doc_json = result.rows[0].doc.as_ref().unwrap();
+        assert_eq!(doc_json["name"], "Alice");
+        assert_eq!(doc_json["_id"], "doc1");
+    }
+
+    #[tokio::test]
+    async fn changes_include_docs() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"val": 42}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+
+        let changes = db.changes(ChangesOptions {
+            include_docs: true,
+            ..Default::default()
+        }).await.unwrap();
+        assert_eq!(changes.results.len(), 1);
+        let doc_json = changes.results[0].doc.as_ref().unwrap();
+        assert_eq!(doc_json["val"], 42);
+        assert_eq!(doc_json["_id"], "doc1");
+    }
+
+    #[tokio::test]
+    async fn changes_include_docs_deleted() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"v": 1}),
+            attachments: HashMap::new(),
+        };
+        let r1 = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        let rev1: Revision = r1[0].rev.clone().unwrap().parse().unwrap();
+
+        let del = Document {
+            id: "doc1".into(), rev: Some(rev1), deleted: true,
+            data: serde_json::json!({}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![del], BulkDocsOptions::new()).await.unwrap();
+
+        let changes = db.changes(ChangesOptions {
+            include_docs: true,
+            ..Default::default()
+        }).await.unwrap();
+        // Only the latest change entry should remain (update replaces)
+        let last = changes.results.last().unwrap();
+        assert!(last.deleted);
+        let doc_json = last.doc.as_ref().unwrap();
+        assert_eq!(doc_json["_deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn revs_diff_identifies_missing() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(1, "abc".into())),
+            deleted: false,
+            data: serde_json::json!({}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc], BulkDocsOptions::replication()).await.unwrap();
+
+        let mut revs = HashMap::new();
+        revs.insert("doc1".into(), vec!["1-abc".into(), "2-def".into()]);
+        revs.insert("doc2".into(), vec!["1-xyz".into()]);
+
+        let diff = db.revs_diff(revs).await.unwrap();
+        // doc1: 2-def missing, 1-abc exists
+        let d1 = &diff.results["doc1"];
+        assert!(d1.missing.contains(&"2-def".to_string()));
+        assert!(!d1.missing.contains(&"1-abc".to_string()));
+        // doc2: entirely missing
+        let d2 = &diff.results["doc2"];
+        assert!(d2.missing.contains(&"1-xyz".to_string()));
+    }
+
+    #[tokio::test]
+    async fn bulk_get_basic() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"name": "Alice"}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+
+        let response = db.bulk_get(vec![
+            BulkGetItem { id: "doc1".into(), rev: None },
+            BulkGetItem { id: "nonexistent".into(), rev: None },
+        ]).await.unwrap();
+
+        assert_eq!(response.results.len(), 2);
+        // doc1 should be found
+        assert!(response.results[0].docs[0].ok.is_some());
+        let ok_doc = response.results[0].docs[0].ok.as_ref().unwrap();
+        assert_eq!(ok_doc["name"], "Alice");
+        assert!(ok_doc["_revisions"].is_object());
+        // nonexistent should error
+        assert!(response.results[1].docs[0].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn auto_generate_id() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: String::new(), rev: None, deleted: false,
+            data: serde_json::json!({"auto": true}),
+            attachments: HashMap::new(),
+        };
+        let results = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        assert!(results[0].ok);
+        assert!(!results[0].id.is_empty());
+
+        let fetched = db.get(&results[0].id, GetOptions::default()).await.unwrap();
+        assert_eq!(fetched.data["auto"], true);
+    }
+
+    #[tokio::test]
+    async fn conflict_put_without_rev_on_existing() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"v": 1}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+
+        // Try to create again without rev => conflict
+        let doc2 = Document {
+            id: "doc1".into(), rev: None, deleted: false,
+            data: serde_json::json!({"v": 2}),
+            attachments: HashMap::new(),
+        };
+        let r = db.bulk_docs(vec![doc2], BulkDocsOptions::new()).await.unwrap();
+        assert!(!r[0].ok);
+        assert_eq!(r[0].error.as_deref(), Some("conflict"));
+    }
+
+    #[tokio::test]
+    async fn put_with_rev_on_nonexistent() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(1, "abc".into())),
+            deleted: false,
+            data: serde_json::json!({}),
+            attachments: HashMap::new(),
+        };
+        let r = db.bulk_docs(vec![doc], BulkDocsOptions::new()).await.unwrap();
+        assert!(!r[0].ok);
+        assert_eq!(r[0].error.as_deref(), Some("not_found"));
+    }
+
+    #[tokio::test]
+    async fn replication_with_revisions_ancestry() {
+        let (_dir, db) = temp_db();
+
+        let doc = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(3, "ccc".into())),
+            deleted: false,
+            data: serde_json::json!({
+                "hello": "world",
+                "_revisions": {
+                    "start": 3,
+                    "ids": ["ccc", "bbb", "aaa"]
+                }
+            }),
+            attachments: HashMap::new(),
+        };
+        let results = db.bulk_docs(vec![doc], BulkDocsOptions::replication()).await.unwrap();
+        assert!(results[0].ok);
+
+        let fetched = db.get("doc1", GetOptions::default()).await.unwrap();
+        assert_eq!(fetched.rev.unwrap().to_string(), "3-ccc");
+        assert_eq!(fetched.data["hello"], "world");
+        // _revisions should be stripped from stored data
+        assert!(fetched.data.get("_revisions").is_none());
+    }
+
+    #[tokio::test]
+    async fn compact_is_noop() {
+        let (_dir, db) = temp_db();
+        db.compact().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_returns_not_found() {
+        let (_dir, db) = temp_db();
+        let result = db.get("nope", GetOptions::default()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_with_conflicts() {
+        let (_dir, db) = temp_db();
+
+        // Create two conflicting revisions via replication mode
+        let doc1 = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(1, "aaa".into())),
+            deleted: false,
+            data: serde_json::json!({"branch": "a"}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc1], BulkDocsOptions::replication()).await.unwrap();
+
+        let doc2 = Document {
+            id: "doc1".into(),
+            rev: Some(Revision::new(1, "bbb".into())),
+            deleted: false,
+            data: serde_json::json!({"branch": "b"}),
+            attachments: HashMap::new(),
+        };
+        db.bulk_docs(vec![doc2], BulkDocsOptions::replication()).await.unwrap();
+
+        let fetched = db.get("doc1", GetOptions { conflicts: true, ..Default::default() }).await.unwrap();
+        assert!(fetched.data["_conflicts"].is_array());
+        assert_eq!(fetched.data["_conflicts"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remove_local_nonexistent() {
+        let (_dir, db) = temp_db();
+        let result = db.remove_local("nope").await;
+        assert!(result.is_err());
+    }
 }

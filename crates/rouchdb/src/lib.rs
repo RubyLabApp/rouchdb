@@ -353,4 +353,114 @@ mod tests {
         assert_eq!(info.doc_count, 2);
         assert_eq!(info.db_name, "test");
     }
+
+    #[tokio::test]
+    async fn database_open_redb() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.redb");
+        let db = Database::open(&path, "test_redb").unwrap();
+
+        db.put("doc1", serde_json::json!({"x": 1})).await.unwrap();
+        let doc = db.get("doc1").await.unwrap();
+        assert_eq!(doc.data["x"], 1);
+    }
+
+    #[tokio::test]
+    async fn database_from_adapter_and_accessor() {
+        let adapter = Arc::new(MemoryAdapter::new("custom"));
+        let db = Database::from_adapter(adapter);
+
+        let _adapter_ref = db.adapter();
+        db.put("doc1", serde_json::json!({})).await.unwrap();
+        let info = db.info().await.unwrap();
+        assert_eq!(info.doc_count, 1);
+    }
+
+    #[tokio::test]
+    async fn database_get_with_opts() {
+        let db = Database::memory("test");
+        let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+        let rev = r1.rev.unwrap();
+
+        let doc = db.get_with_opts("doc1", GetOptions {
+            rev: Some(rev),
+            ..Default::default()
+        }).await.unwrap();
+        assert_eq!(doc.data["v"], 1);
+    }
+
+    #[tokio::test]
+    async fn database_bulk_docs() {
+        let db = Database::memory("test");
+
+        let docs = vec![
+            Document {
+                id: "a".into(), rev: None, deleted: false,
+                data: serde_json::json!({"x": 1}),
+                attachments: std::collections::HashMap::new(),
+            },
+            Document {
+                id: "b".into(), rev: None, deleted: false,
+                data: serde_json::json!({"x": 2}),
+                attachments: std::collections::HashMap::new(),
+            },
+        ];
+        let results = db.bulk_docs(docs, BulkDocsOptions::new()).await.unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results[0].ok);
+        assert!(results[1].ok);
+    }
+
+    #[tokio::test]
+    async fn database_all_docs() {
+        let db = Database::memory("test");
+        db.put("a", serde_json::json!({})).await.unwrap();
+        db.put("b", serde_json::json!({})).await.unwrap();
+
+        let result = db.all_docs(AllDocsOptions::new()).await.unwrap();
+        assert_eq!(result.rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn database_changes() {
+        let db = Database::memory("test");
+        db.put("a", serde_json::json!({})).await.unwrap();
+        db.put("b", serde_json::json!({})).await.unwrap();
+
+        let changes = db.changes(ChangesOptions::default()).await.unwrap();
+        assert_eq!(changes.results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn database_replicate_to_with_opts() {
+        let local = Database::memory("local");
+        let remote = Database::memory("remote");
+
+        local.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+
+        let result = local.replicate_to_with_opts(
+            &remote,
+            ReplicationOptions { batch_size: 1, batches_limit: 10 },
+        ).await.unwrap();
+        assert!(result.ok);
+
+        let doc = remote.get("doc1").await.unwrap();
+        assert_eq!(doc.data["v"], 1);
+    }
+
+    #[tokio::test]
+    async fn database_compact() {
+        let db = Database::memory("test");
+        db.compact().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_destroy() {
+        let db = Database::memory("test");
+        db.put("doc1", serde_json::json!({})).await.unwrap();
+        db.destroy().await.unwrap();
+
+        let info = db.info().await.unwrap();
+        assert_eq!(info.doc_count, 0);
+    }
 }

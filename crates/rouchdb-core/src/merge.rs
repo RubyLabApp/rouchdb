@@ -690,4 +690,145 @@ mod tests {
         let leaves = collect_leaves(&tree);
         assert_eq!(leaves[0].hash, "e");
     }
+
+    #[test]
+    fn stem_stops_at_branch_point() {
+        // 1-a -> 2-b -> 3-c
+        //            -> 3-d
+        let mut tree = vec![RevPath {
+            pos: 1,
+            tree: node("a", vec![node("b", vec![leaf("c"), leaf("d")])]),
+        }];
+
+        // Even with depth=1, cannot stem past the branch point at 2-b
+        let stemmed = stem(&mut tree, 1);
+        // Stemmed should remove at most 1-a (stop at branch)
+        // Actually, can stem 1-a since 2-b has multiple children
+        // but 2-b cannot be stemmed because it has >1 child
+        assert!(stemmed.len() <= 1);
+    }
+
+    #[test]
+    fn stem_short_tree_unchanged() {
+        // 1-a -> 2-b (depth 1, limit 3 => nothing to prune)
+        let mut tree = vec![RevPath {
+            pos: 1,
+            tree: node("a", vec![leaf("b")]),
+        }];
+
+        let stemmed = stem(&mut tree, 3);
+        assert!(stemmed.is_empty());
+        assert_eq!(tree[0].pos, 1);
+    }
+
+    // --- latest_rev ---
+
+    #[test]
+    fn latest_rev_finds_available_node() {
+        let tree = simple_tree(); // 1-a -> 2-b -> 3-c
+        let rev = latest_rev(&tree, 3, "c").unwrap();
+        assert_eq!(rev.pos, 3);
+        assert_eq!(rev.hash, "c");
+    }
+
+    #[test]
+    fn latest_rev_walks_to_leaf_from_missing() {
+        // 1-a(missing) -> 2-b(available)
+        let tree = vec![RevPath {
+            pos: 1,
+            tree: RevNode {
+                hash: "a".into(),
+                status: RevStatus::Missing,
+                opts: NodeOpts::default(),
+                children: vec![leaf("b")],
+            },
+        }];
+        let rev = latest_rev(&tree, 1, "a").unwrap();
+        assert_eq!(rev.pos, 2);
+        assert_eq!(rev.hash, "b");
+    }
+
+    #[test]
+    fn latest_rev_none_for_nonexistent() {
+        let tree = simple_tree();
+        assert!(latest_rev(&tree, 5, "zzz").is_none());
+    }
+
+    #[test]
+    fn latest_rev_finds_internal_node() {
+        let tree = simple_tree(); // 1-a -> 2-b -> 3-c
+        let rev = latest_rev(&tree, 2, "b").unwrap();
+        assert_eq!(rev.pos, 2);
+        assert_eq!(rev.hash, "b");
+    }
+
+    #[test]
+    fn latest_rev_on_empty_tree() {
+        let tree: RevTree = vec![];
+        assert!(latest_rev(&tree, 1, "a").is_none());
+    }
+
+    // --- merge edge cases ---
+
+    #[test]
+    fn merge_exact_root_match_no_children() {
+        // Tree: 1-a (single node)
+        let tree = vec![RevPath {
+            pos: 1,
+            tree: leaf("a"),
+        }];
+
+        // Add same node: 1-a
+        let new_path = RevPath {
+            pos: 1,
+            tree: leaf("a"),
+        };
+
+        let (_, result) = merge_tree(&tree, &new_path, 1000);
+        assert_eq!(result, MergeResult::InternalNode);
+    }
+
+    #[test]
+    fn merge_same_branch_extends_deeper() {
+        // Tree: 1-a -> 2-b -> 3-c
+        let tree = simple_tree();
+
+        // Add: 1-a -> 2-b -> 3-c -> 4-d (full ancestry extending leaf)
+        let new_path = build_path_from_revs(
+            4,
+            &["d".into(), "c".into(), "b".into(), "a".into()],
+            NodeOpts::default(),
+            RevStatus::Available,
+        );
+
+        let (merged, result) = merge_tree(&tree, &new_path, 1000);
+        assert_eq!(result, MergeResult::NewLeaf);
+        let winner = winning_rev(&merged).unwrap();
+        assert_eq!(winner.pos, 4);
+        assert_eq!(winner.hash, "d");
+    }
+
+    #[test]
+    fn winning_rev_empty_tree() {
+        let tree: RevTree = vec![];
+        assert!(winning_rev(&tree).is_none());
+    }
+
+    #[test]
+    fn is_deleted_empty_tree() {
+        let tree: RevTree = vec![];
+        assert!(!is_deleted(&tree));
+    }
+
+    #[test]
+    fn collect_conflicts_deleted_leaves_excluded() {
+        // 1-a -> 2-b (normal), 2-c (deleted)
+        // Winner: 2-b, conflict: none (2-c is deleted)
+        let tree = vec![RevPath {
+            pos: 1,
+            tree: node("a", vec![leaf("b"), deleted_leaf("c")]),
+        }];
+        let conflicts = collect_conflicts(&tree);
+        assert!(conflicts.is_empty());
+    }
 }
