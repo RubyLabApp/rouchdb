@@ -1,0 +1,75 @@
+//! Error condition tests: nonexistent docs, wrong revisions, conflicts.
+
+mod common;
+
+use common::{delete_remote_db, fresh_remote_db};
+use rouchdb::{Database, RouchError};
+
+#[tokio::test]
+#[ignore]
+async fn error_get_nonexistent_doc() {
+    let url = fresh_remote_db("err_noexist").await;
+    let db = Database::http(&url);
+
+    let result = db.get("does_not_exist").await;
+    assert!(matches!(result, Err(RouchError::NotFound(_))));
+
+    delete_remote_db(&url).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn error_update_wrong_rev() {
+    let url = fresh_remote_db("err_wrongrev").await;
+    let db = Database::http(&url);
+
+    db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+
+    let result = db.update("doc1", "1-bogusrevisionhash", serde_json::json!({"v": 2})).await;
+    assert!(result.is_err() || !result.unwrap().ok);
+
+    delete_remote_db(&url).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn error_delete_wrong_rev() {
+    let url = fresh_remote_db("err_delrev").await;
+    let db = Database::http(&url);
+
+    db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+
+    let result = db.remove("doc1", "1-bogusrevisionhash").await;
+    assert!(result.is_err() || !result.unwrap().ok);
+
+    delete_remote_db(&url).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn error_put_existing_without_rev() {
+    let url = fresh_remote_db("err_dup").await;
+    let db = Database::http(&url);
+
+    db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+
+    let result = db.put("doc1", serde_json::json!({"v": 2})).await;
+    assert!(result.is_err() || !result.unwrap().ok);
+
+    delete_remote_db(&url).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn error_get_deleted_doc() {
+    let url = fresh_remote_db("err_deleted").await;
+    let db = Database::http(&url);
+
+    let r1 = db.put("doc1", serde_json::json!({"v": 1})).await.unwrap();
+    db.remove("doc1", &r1.rev.unwrap()).await.unwrap();
+
+    let result = db.get("doc1").await;
+    assert!(matches!(result, Err(RouchError::NotFound(_))));
+
+    delete_remote_db(&url).await;
+}
