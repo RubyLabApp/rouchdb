@@ -1,6 +1,6 @@
-[package]
-name = "RouchDB"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+resolver = "3"
+members = [
+    "crates/rouchdb-core",
+    "crates/rouchdb-adapter-memory",
+]
