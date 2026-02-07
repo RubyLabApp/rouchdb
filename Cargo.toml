@@ -4,4 +4,5 @@ members = [
     "crates/rouchdb-core",
     "crates/rouchdb-adapter-memory",
     "crates/rouchdb-changes",
+    "crates/rouchdb-adapter-redb",
 ]
