@@ -1,10 +1,16 @@
 [package]
 name = "rouchdb-adapter-memory"
-version = "0.1.0"
-edition = "2024"
+description = "In-memory storage adapter for RouchDB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-rouchdb-core = { path = "../rouchdb-core" }
+rouchdb-core = { path = "../rouchdb-core", version = "0.1.0" }
 async-trait = "0.1"
 base64 = "0.22"
 md-5 = "0.10"

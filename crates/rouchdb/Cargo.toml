@@ -1,17 +1,22 @@
 [package]
 name = "rouchdb"
-version = "0.1.0"
-edition = "2024"
-description = "Local-first document database with CouchDB replication protocol"
+description = "Local-first document database with CouchDB replication protocol support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-rouchdb-core = { path = "../rouchdb-core" }
-rouchdb-adapter-memory = { path = "../rouchdb-adapter-memory" }
-rouchdb-adapter-redb = { path = "../rouchdb-adapter-redb" }
-rouchdb-adapter-http = { path = "../rouchdb-adapter-http" }
-rouchdb-changes = { path = "../rouchdb-changes" }
-rouchdb-replication = { path = "../rouchdb-replication" }
-rouchdb-query = { path = "../rouchdb-query" }
+rouchdb-core = { path = "../rouchdb-core", version = "0.1.0" }
+rouchdb-adapter-memory = { path = "../rouchdb-adapter-memory", version = "0.1.0" }
+rouchdb-adapter-redb = { path = "../rouchdb-adapter-redb", version = "0.1.0" }
+rouchdb-adapter-http = { path = "../rouchdb-adapter-http", version = "0.1.0" }
+rouchdb-changes = { path = "../rouchdb-changes", version = "0.1.0" }
+rouchdb-replication = { path = "../rouchdb-replication", version = "0.1.0" }
+rouchdb-query = { path = "../rouchdb-query", version = "0.1.0" }
 serde_json = "1"
 
 [dev-dependencies]

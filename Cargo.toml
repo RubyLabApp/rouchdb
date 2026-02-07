@@ -10,3 +10,12 @@ members = [
     "crates/rouchdb-query",
     "crates/rouchdb",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/RubyLabApp/rouchdb"
+homepage = "https://github.com/RubyLabApp/rouchdb"
+keywords = ["database", "couchdb", "pouchdb", "replication", "local-first"]
+categories = ["database", "data-structures"]

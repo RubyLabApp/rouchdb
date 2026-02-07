@@ -1,7 +1,13 @@
 [package]
 name = "rouchdb-core"
-version = "0.1.0"
-edition = "2024"
+description = "Core types, traits, and algorithms for RouchDB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 async-trait = "0.1"
