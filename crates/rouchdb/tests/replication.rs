@@ -3,7 +3,7 @@
 mod common;
 
 use common::{delete_remote_db, fresh_remote_db};
-use rouchdb::{ChangesOptions, Database, ReplicationOptions};
+use rouchdb::{ChangesOptions, Database, ReplicationFilter, ReplicationOptions};
 
 // =========================================================================
 // Basic replication (local ↔ remote)
@@ -751,6 +751,121 @@ async fn sync_many_docs_diverse_operations() {
         let result = remote.get(&format!("doc{:02}", i)).await;
         assert!(result.is_err(), "doc{:02} should be deleted", i);
     }
+
+    delete_remote_db(&url).await;
+}
+
+// =========================================================================
+// Filtered replication
+// =========================================================================
+
+#[tokio::test]
+#[ignore]
+async fn replicate_filtered_doc_ids_to_couchdb() {
+    let url = fresh_remote_db("filter_docids").await;
+    let local = Database::memory("local");
+    let remote = Database::http(&url);
+
+    local
+        .put("doc1", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
+    local
+        .put("doc2", serde_json::json!({"v": 2}))
+        .await
+        .unwrap();
+    local
+        .put("doc3", serde_json::json!({"v": 3}))
+        .await
+        .unwrap();
+    local
+        .put("doc4", serde_json::json!({"v": 4}))
+        .await
+        .unwrap();
+
+    let result = local
+        .replicate_to_with_opts(
+            &remote,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec![
+                    "doc1".into(),
+                    "doc3".into(),
+                ])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(result.ok);
+    assert_eq!(result.docs_written, 2);
+
+    let info = remote.info().await.unwrap();
+    assert_eq!(info.doc_count, 2);
+
+    let doc = remote.get("doc1").await.unwrap();
+    assert_eq!(doc.data["v"], 1);
+    let doc = remote.get("doc3").await.unwrap();
+    assert_eq!(doc.data["v"], 3);
+
+    assert!(remote.get("doc2").await.is_err());
+    assert!(remote.get("doc4").await.is_err());
+
+    delete_remote_db(&url).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn replicate_filtered_selector_from_couchdb() {
+    let url = fresh_remote_db("filter_selector").await;
+    let remote = Database::http(&url);
+    let local = Database::memory("local");
+
+    remote
+        .put(
+            "inv1",
+            serde_json::json!({"type": "invoice", "amount": 100}),
+        )
+        .await
+        .unwrap();
+    remote
+        .put(
+            "inv2",
+            serde_json::json!({"type": "invoice", "amount": 200}),
+        )
+        .await
+        .unwrap();
+    remote
+        .put(
+            "user1",
+            serde_json::json!({"type": "user", "name": "Alice"}),
+        )
+        .await
+        .unwrap();
+
+    let result = rouchdb::replicate(
+        remote.adapter(),
+        local.adapter(),
+        ReplicationOptions {
+            filter: Some(ReplicationFilter::Selector(
+                serde_json::json!({"type": "invoice"}),
+            )),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(result.ok);
+    assert_eq!(result.docs_written, 2);
+
+    let info = local.info().await.unwrap();
+    assert_eq!(info.doc_count, 2);
+
+    let doc = local.get("inv1").await.unwrap();
+    assert_eq!(doc.data["amount"], 100);
+
+    assert!(local.get("user1").await.is_err());
 
     delete_remote_db(&url).await;
 }

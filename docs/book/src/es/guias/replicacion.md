@@ -57,8 +57,8 @@ curl -X PUT http://admin:password@localhost:15984/mydb
 use rouchdb::ReplicationOptions;
 
 let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
-    batch_size: 50,      // documentos por lote (default: 100)
-    batches_limit: 5,    // limite de lotes (default: 10)
+    batch_size: 50,
+    ..Default::default()
 }).await?;
 ```
 
@@ -66,6 +66,35 @@ let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
 |-------|------|---------|-------------|
 | `batch_size` | `u64` | `100` | Numero de cambios a procesar por iteracion |
 | `batches_limit` | `u64` | `10` | Maximo numero de lotes a buffear |
+| `filter` | `Option<ReplicationFilter>` | `None` | Filtro opcional para replicacion selectiva |
+
+## Replicacion filtrada
+
+Se puede replicar un subconjunto de documentos usando `ReplicationFilter`:
+
+```rust
+use rouchdb::{ReplicationOptions, ReplicationFilter};
+
+// Por IDs de documento
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::DocIds(vec!["doc1".into(), "doc2".into()])),
+    ..Default::default()
+}).await?;
+
+// Por selector Mango
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::Selector(serde_json::json!({"type": "invoice"}))),
+    ..Default::default()
+}).await?;
+
+// Por closure personalizado
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::Custom(Box::new(|change| {
+        change.id.starts_with("public:")
+    }))),
+    ..Default::default()
+}).await?;
+```
 
 ## Checkpoints
 
