@@ -51,7 +51,9 @@ pub use rouchdb_query::{
     FindOptions, FindResponse, ReduceFn, SortField, ViewQueryOptions, ViewResult, find,
     matches_selector, query_view,
 };
-pub use rouchdb_replication::{ReplicationEvent, ReplicationOptions, ReplicationResult, replicate};
+pub use rouchdb_replication::{
+    ReplicationEvent, ReplicationFilter, ReplicationOptions, ReplicationResult, replicate,
+};
 
 /// A high-level database handle that wraps any adapter implementation.
 ///
@@ -464,6 +466,7 @@ mod tests {
                 ReplicationOptions {
                     batch_size: 1,
                     batches_limit: 10,
+                    ..Default::default()
                 },
             )
             .await

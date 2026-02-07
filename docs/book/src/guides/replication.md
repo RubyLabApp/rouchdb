@@ -97,7 +97,7 @@ use rouchdb::ReplicationOptions;
 
 let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
     batch_size: 50,
-    batches_limit: 5,
+    ..Default::default()
 }).await?;
 ```
 
@@ -109,6 +109,8 @@ use rouchdb::ReplicationOptions;
 let opts = ReplicationOptions {
     batch_size: 100,   // documents per batch (default: 100)
     batches_limit: 10, // max batches to buffer (default: 10)
+    filter: None,      // optional filter (default: None)
+    ..Default::default()
 };
 ```
 
@@ -116,6 +118,60 @@ let opts = ReplicationOptions {
 |-------|---------|-------------|
 | `batch_size` | 100 | Number of documents to process in each replication batch. Smaller values mean more frequent checkpoints. |
 | `batches_limit` | 10 | Maximum number of batches to buffer. Controls memory usage for large replications. |
+| `filter` | `None` | Optional `ReplicationFilter` for selective replication. See [Filtered Replication](#filtered-replication). |
+
+## Filtered Replication
+
+You can replicate a subset of documents using `ReplicationFilter`. Three filter types are available:
+
+### Filter by Document IDs
+
+Replicate only specific documents by their IDs. This is the most efficient filter -- it pushes the filtering down to the changes feed.
+
+```rust
+use rouchdb::{ReplicationOptions, ReplicationFilter};
+
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::DocIds(vec![
+        "user:alice".into(),
+        "user:bob".into(),
+    ])),
+    ..Default::default()
+}).await?;
+```
+
+### Filter by Mango Selector
+
+Replicate documents matching a Mango query selector. The selector is evaluated against each document's data after fetching.
+
+```rust
+use rouchdb::{ReplicationOptions, ReplicationFilter};
+
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::Selector(serde_json::json!({
+        "type": "invoice",
+        "status": "pending"
+    }))),
+    ..Default::default()
+}).await?;
+```
+
+### Filter by Custom Closure
+
+Pass a Rust closure that receives each `ChangeEvent` and returns `true` to replicate or `false` to skip.
+
+```rust
+use rouchdb::{ReplicationOptions, ReplicationFilter};
+
+let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
+    filter: Some(ReplicationFilter::Custom(Box::new(|change| {
+        change.id.starts_with("public:")
+    }))),
+    ..Default::default()
+}).await?;
+```
+
+**Note:** Checkpoints advance past all processed changes regardless of filtering. This means re-running filtered replication won't re-evaluate previously seen changes.
 
 ## How the Replication Protocol Works
 
@@ -228,7 +284,7 @@ async fn main() -> rouchdb::Result<()> {
     // Push to CouchDB with custom batch size
     let push = local.replicate_to_with_opts(&remote, ReplicationOptions {
         batch_size: 50,
-        batches_limit: 10,
+        ..Default::default()
     }).await?;
 
     println!("Push complete: {} docs written", push.docs_written);

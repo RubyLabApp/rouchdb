@@ -12,4 +12,6 @@ mod checkpoint;
 mod protocol;
 
 pub use checkpoint::Checkpointer;
-pub use protocol::{ReplicationEvent, ReplicationOptions, ReplicationResult, replicate};
+pub use protocol::{
+    ReplicationEvent, ReplicationFilter, ReplicationOptions, ReplicationResult, replicate,
+};

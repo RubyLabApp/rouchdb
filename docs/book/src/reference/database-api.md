@@ -119,6 +119,15 @@ All replication methods implement the CouchDB replication protocol: checkpoint r
 |-------|------|---------|-------------|
 | `batch_size` | `u64` | `100` | Number of documents to process per batch. |
 | `batches_limit` | `u64` | `10` | Maximum number of batches to buffer. |
+| `filter` | `Option<ReplicationFilter>` | `None` | Optional filter for selective replication. |
+
+### ReplicationFilter
+
+| Variant | Description |
+|---------|-------------|
+| `DocIds(Vec<String>)` | Replicate only the listed document IDs. Filtering at the changes feed level (most efficient). |
+| `Selector(serde_json::Value)` | Replicate documents matching a Mango selector. Evaluated after fetching documents. |
+| `Custom(Box<dyn Fn(&ChangeEvent) -> bool + Send + Sync>)` | Replicate documents passing a custom predicate applied to each change event. |
 
 ### ReplicationResult
 

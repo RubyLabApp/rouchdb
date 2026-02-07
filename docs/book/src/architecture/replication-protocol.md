@@ -239,14 +239,20 @@ The loop terminates when a changes response returns fewer results than
 
 ```rust
 pub struct ReplicationOptions {
-    pub batch_size: u64,       // default: 100
-    pub batches_limit: u64,    // default: 10
+    pub batch_size: u64,                   // default: 100
+    pub batches_limit: u64,                // default: 10
+    pub filter: Option<ReplicationFilter>, // default: None
 }
 ```
 
 - `batch_size` -- number of change events to process per iteration.
 - `batches_limit` -- maximum number of batches to buffer (reserved for
   future pipelining).
+- `filter` -- optional filter for selective replication. Supports
+  `DocIds(Vec<String>)`, `Selector(serde_json::Value)`, or
+  `Custom(Box<dyn Fn(&ChangeEvent) -> bool>)`. When `DocIds` is used,
+  filtering happens at the changes feed level. `Selector` filters after
+  `bulk_get`. `Custom` filters after fetching changes.
 
 ## Result
 

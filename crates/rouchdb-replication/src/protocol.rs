@@ -6,13 +6,28 @@ use rouchdb_core::error::Result;
 
 use crate::checkpoint::Checkpointer;
 
+/// Filter for selective replication.
+pub enum ReplicationFilter {
+    /// Replicate only these document IDs.
+    DocIds(Vec<String>),
+
+    /// Replicate documents matching a Mango selector.
+    Selector(serde_json::Value),
+
+    /// Replicate documents passing a custom predicate.
+    /// Receives the ChangeEvent (id, deleted, seq).
+    #[allow(clippy::type_complexity)]
+    Custom(Box<dyn Fn(&ChangeEvent) -> bool + Send + Sync>),
+}
+
 /// Replication configuration.
-#[derive(Debug, Clone)]
 pub struct ReplicationOptions {
     /// Number of documents to process per batch.
     pub batch_size: u64,
     /// Maximum number of batches to buffer.
     pub batches_limit: u64,
+    /// Optional filter for selective replication.
+    pub filter: Option<ReplicationFilter>,
 }
 
 impl Default for ReplicationOptions {
@@ -20,6 +35,7 @@ impl Default for ReplicationOptions {
         Self {
             batch_size: 100,
             batches_limit: 10,
+            filter: None,
         }
     }
 }
@@ -66,6 +82,12 @@ pub async fn replicate(
     // Step 1: Read checkpoint
     let since = checkpointer.read_checkpoint(source, target).await?;
 
+    // Extract doc_ids from filter (for ChangesOptions)
+    let filter_doc_ids = match &opts.filter {
+        Some(ReplicationFilter::DocIds(ids)) => Some(ids.clone()),
+        _ => None,
+    };
+
     let mut total_docs_read = 0u64;
     let mut total_docs_written = 0u64;
     let mut errors = Vec::new();
@@ -78,6 +100,7 @@ pub async fn replicate(
                 since: current_seq.clone(),
                 limit: Some(opts.batch_size),
                 include_docs: false,
+                doc_ids: filter_doc_ids.clone(),
                 ..Default::default()
             })
             .await?;
@@ -87,11 +110,28 @@ pub async fn replicate(
         }
 
         let batch_last_seq = changes.last_seq;
-        total_docs_read += changes.results.len() as u64;
+
+        // Step 2.5: Apply Custom filter to changes
+        let filtered_changes: Vec<&ChangeEvent> = match &opts.filter {
+            Some(ReplicationFilter::Custom(predicate)) => {
+                changes.results.iter().filter(|c| predicate(c)).collect()
+            }
+            _ => changes.results.iter().collect(),
+        };
+
+        total_docs_read += filtered_changes.len() as u64;
+
+        if filtered_changes.is_empty() {
+            current_seq = batch_last_seq;
+            if (changes.results.len() as u64) < opts.batch_size {
+                break;
+            }
+            continue;
+        }
 
         // Step 3: Compute revision diff
         let mut rev_map: HashMap<String, Vec<String>> = HashMap::new();
-        for change in &changes.results {
+        for change in &filtered_changes {
             let revs: Vec<String> = change.changes.iter().map(|c| c.rev.clone()).collect();
             rev_map.insert(change.id.clone(), revs);
         }
@@ -101,6 +141,9 @@ pub async fn replicate(
         if diff.results.is_empty() {
             // Target already has everything in this batch
             current_seq = batch_last_seq;
+            if (changes.results.len() as u64) < opts.batch_size {
+                break;
+            }
             continue;
         }
 
@@ -128,6 +171,11 @@ pub async fn replicate(
                     }
                 }
             }
+        }
+
+        // Step 4.5: Apply Selector filter to fetched documents
+        if let Some(ReplicationFilter::Selector(ref selector)) = opts.filter {
+            docs_to_write.retain(|doc| rouchdb_query::matches_selector(&doc.data, selector));
         }
 
         if !docs_to_write.is_empty() {
@@ -347,5 +395,272 @@ mod tests {
         // Target should see deletion
         let target_info = target.info().await.unwrap();
         assert_eq!(target_info.doc_count, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Filtered replication tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn replicate_filtered_by_doc_ids() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        put_doc(&source, "doc1", serde_json::json!({"v": 1})).await;
+        put_doc(&source, "doc2", serde_json::json!({"v": 2})).await;
+        put_doc(&source, "doc3", serde_json::json!({"v": 3})).await;
+        put_doc(&source, "doc4", serde_json::json!({"v": 4})).await;
+        put_doc(&source, "doc5", serde_json::json!({"v": 5})).await;
+
+        let result = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec![
+                    "doc2".into(),
+                    "doc4".into(),
+                ])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.ok);
+        assert_eq!(result.docs_written, 2);
+
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 2);
+
+        target.get("doc2", GetOptions::default()).await.unwrap();
+        target.get("doc4", GetOptions::default()).await.unwrap();
+
+        // doc1, doc3, doc5 should not exist
+        assert!(target.get("doc1", GetOptions::default()).await.is_err());
+        assert!(target.get("doc3", GetOptions::default()).await.is_err());
+        assert!(target.get("doc5", GetOptions::default()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn replicate_filtered_by_selector() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        put_doc(
+            &source,
+            "inv1",
+            serde_json::json!({"type": "invoice", "amount": 100}),
+        )
+        .await;
+        put_doc(
+            &source,
+            "inv2",
+            serde_json::json!({"type": "invoice", "amount": 200}),
+        )
+        .await;
+        put_doc(
+            &source,
+            "user1",
+            serde_json::json!({"type": "user", "name": "Alice"}),
+        )
+        .await;
+        put_doc(
+            &source,
+            "user2",
+            serde_json::json!({"type": "user", "name": "Bob"}),
+        )
+        .await;
+
+        let result = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::Selector(
+                    serde_json::json!({"type": "invoice"}),
+                )),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.ok);
+        assert_eq!(result.docs_written, 2);
+
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 2);
+
+        let doc = target.get("inv1", GetOptions::default()).await.unwrap();
+        assert_eq!(doc.data["amount"], 100);
+
+        assert!(target.get("user1", GetOptions::default()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn replicate_filtered_by_custom_closure() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        put_doc(&source, "public:doc1", serde_json::json!({"v": 1})).await;
+        put_doc(&source, "public:doc2", serde_json::json!({"v": 2})).await;
+        put_doc(&source, "private:doc3", serde_json::json!({"v": 3})).await;
+        put_doc(&source, "private:doc4", serde_json::json!({"v": 4})).await;
+
+        let result = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::Custom(Box::new(|change| {
+                    change.id.starts_with("public:")
+                }))),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.ok);
+        assert_eq!(result.docs_written, 2);
+
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 2);
+
+        target
+            .get("public:doc1", GetOptions::default())
+            .await
+            .unwrap();
+        assert!(
+            target
+                .get("private:doc3", GetOptions::default())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn replicate_filtered_incremental() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        // First batch
+        put_doc(&source, "doc1", serde_json::json!({"type": "a"})).await;
+        put_doc(&source, "doc2", serde_json::json!({"type": "b"})).await;
+
+        let r1 = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec!["doc1".into()])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(r1.docs_written, 1);
+
+        // Add more docs
+        put_doc(&source, "doc3", serde_json::json!({"type": "a"})).await;
+        put_doc(&source, "doc4", serde_json::json!({"type": "b"})).await;
+
+        // Second replication — checkpoint should have advanced past doc1/doc2
+        let r2 = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec![
+                    "doc1".into(),
+                    "doc3".into(),
+                ])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Only doc3 is new (doc1 was already replicated)
+        assert_eq!(r2.docs_written, 1);
+
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 2); // doc1 + doc3
+    }
+
+    #[tokio::test]
+    async fn replicate_filtered_with_deletes() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        put_doc(&source, "doc1", serde_json::json!({"type": "keep"})).await;
+        put_doc(&source, "doc2", serde_json::json!({"type": "skip"})).await;
+
+        // Replicate only doc1
+        replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec!["doc1".into()])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Delete doc1 on source
+        let doc = source.get("doc1", GetOptions::default()).await.unwrap();
+        let del = Document {
+            id: "doc1".into(),
+            rev: doc.rev,
+            deleted: true,
+            data: serde_json::json!({}),
+            attachments: HashMap::new(),
+        };
+        source
+            .bulk_docs(vec![del], BulkDocsOptions::new())
+            .await
+            .unwrap();
+
+        // Replicate again with same filter — deletion should propagate
+        let result = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: Some(ReplicationFilter::DocIds(vec!["doc1".into()])),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.ok);
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 0);
+    }
+
+    #[tokio::test]
+    async fn replicate_no_filter_unchanged() {
+        let source = MemoryAdapter::new("source");
+        let target = MemoryAdapter::new("target");
+
+        put_doc(&source, "doc1", serde_json::json!({"v": 1})).await;
+        put_doc(&source, "doc2", serde_json::json!({"v": 2})).await;
+        put_doc(&source, "doc3", serde_json::json!({"v": 3})).await;
+
+        // No filter — should replicate everything (same as before)
+        let result = replicate(
+            &source,
+            &target,
+            ReplicationOptions {
+                filter: None,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(result.ok);
+        assert_eq!(result.docs_read, 3);
+        assert_eq!(result.docs_written, 3);
+
+        let target_info = target.info().await.unwrap();
+        assert_eq!(target_info.doc_count, 3);
     }
 }
