@@ -386,17 +386,25 @@ impl Adapter for HttpAdapter {
         if let Some(limit) = opts.limit {
             params.push(format!("limit={}", limit));
         }
-        if let Some(ref _doc_ids) = opts.doc_ids {
+
+        // Determine which filter to use — doc_ids and selector are mutually exclusive
+        let use_post = opts.doc_ids.is_some() || opts.selector.is_some();
+        if opts.doc_ids.is_some() {
             params.push("filter=_doc_ids".into());
-            // doc_ids need to be sent as POST body for _changes
+        } else if opts.selector.is_some() {
+            params.push("filter=_selector".into());
         }
 
         let url = format!("{}?{}", self.url("_changes"), params.join("&"));
 
-        let resp = if let Some(doc_ids) = opts.doc_ids {
-            let body = serde_json::json!({
-                "doc_ids": doc_ids
-            });
+        let resp = if use_post {
+            let body = if let Some(doc_ids) = opts.doc_ids {
+                serde_json::json!({ "doc_ids": doc_ids })
+            } else if let Some(selector) = opts.selector {
+                serde_json::json!({ "selector": selector })
+            } else {
+                serde_json::json!({})
+            };
             self.client
                 .post(&url)
                 .json(&body)

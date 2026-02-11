@@ -292,6 +292,7 @@ pub struct ChangesOptions {
     pub include_docs: bool,
     pub live: bool,
     pub doc_ids: Option<Vec<String>>,
+    pub selector: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

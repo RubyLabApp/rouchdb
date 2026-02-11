@@ -1,9 +1,9 @@
-//! Changes feed advanced options: since, limit, include_docs, updates/deletes.
+//! Changes feed advanced options: since, limit, include_docs, selector, live changes.
 
 mod common;
 
 use common::{delete_remote_db, fresh_remote_db};
-use rouchdb::{ChangesOptions, Database};
+use rouchdb::{ChangesOptions, ChangesStreamOptions, Database};
 
 #[tokio::test]
 #[ignore]
@@ -107,5 +107,88 @@ async fn changes_after_updates_and_deletes() {
     let doc3_change = changes.results.iter().find(|r| r.id == "doc3").unwrap();
     assert!(doc3_change.deleted);
 
+    delete_remote_db(&url).await;
+}
+
+// =========================================================================
+// Selector filter on changes (CouchDB _selector filter)
+// =========================================================================
+
+#[tokio::test]
+#[ignore]
+async fn changes_with_selector_filter() {
+    let url = fresh_remote_db("ch_sel").await;
+    let db = Database::http(&url);
+
+    db.put(
+        "user1",
+        serde_json::json!({"type": "user", "name": "Alice"}),
+    )
+    .await
+    .unwrap();
+    db.put(
+        "inv1",
+        serde_json::json!({"type": "invoice", "amount": 100}),
+    )
+    .await
+    .unwrap();
+    db.put("user2", serde_json::json!({"type": "user", "name": "Bob"}))
+        .await
+        .unwrap();
+
+    let changes = db
+        .changes(ChangesOptions {
+            selector: Some(serde_json::json!({"type": "user"})),
+            include_docs: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(changes.results.len(), 2);
+    for event in &changes.results {
+        let doc = event.doc.as_ref().unwrap();
+        assert_eq!(doc["type"], "user");
+    }
+
+    delete_remote_db(&url).await;
+}
+
+// =========================================================================
+// Live changes via Database::live_changes()
+// =========================================================================
+
+#[tokio::test]
+#[ignore]
+async fn live_changes_picks_up_new_docs() {
+    let url = fresh_remote_db("ch_live").await;
+    let db = Database::http(&url);
+
+    db.put("existing", serde_json::json!({"v": 1}))
+        .await
+        .unwrap();
+
+    let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+        poll_interval: std::time::Duration::from_millis(200),
+        ..Default::default()
+    });
+
+    // Should receive the existing doc
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(event.id, "existing");
+
+    // Add a new doc
+    db.put("new1", serde_json::json!({"v": 2})).await.unwrap();
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(event.id, "new1");
+
+    handle.cancel();
     delete_remote_db(&url).await;
 }

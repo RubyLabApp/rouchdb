@@ -8,7 +8,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
 
 use rouchdb_core::adapter::Adapter;
 use rouchdb_core::document::{ChangeEvent, ChangesOptions, Seq};
@@ -73,6 +74,7 @@ pub struct ChangesStreamOptions {
     pub live: bool,
     pub include_docs: bool,
     pub doc_ids: Option<Vec<String>>,
+    pub selector: Option<serde_json::Value>,
     pub limit: Option<u64>,
     /// Polling interval for live mode when no broadcast channel is available.
     pub poll_interval: Duration,
@@ -85,6 +87,7 @@ impl Default for ChangesStreamOptions {
             live: false,
             include_docs: false,
             doc_ids: None,
+            selector: None,
             limit: None,
             poll_interval: Duration::from_millis(500),
         }
@@ -103,6 +106,7 @@ pub async fn get_changes(
         include_docs: opts.include_docs,
         live: false,
         doc_ids: opts.doc_ids,
+        selector: None,
     };
 
     let response = adapter.changes(changes_opts).await?;
@@ -163,6 +167,7 @@ impl LiveChangesStream {
             include_docs: self.opts.include_docs,
             live: false,
             doc_ids: self.opts.doc_ids.clone(),
+            selector: None,
         };
 
         let response = self.adapter.changes(changes_opts).await?;
@@ -238,6 +243,61 @@ impl LiveChangesStream {
             }
         }
     }
+}
+
+/// Handle for a live changes stream. Dropping or cancelling stops the stream.
+pub struct ChangesHandle {
+    cancel: CancellationToken,
+}
+
+impl ChangesHandle {
+    /// Cancel the live changes stream.
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+}
+
+impl Drop for ChangesHandle {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+
+/// Start a live changes stream that sends events through an mpsc channel.
+///
+/// Spawns a background task that polls the adapter for changes and sends
+/// each `ChangeEvent` through the returned receiver. The `ChangesHandle`
+/// controls the stream's lifecycle.
+pub fn live_changes(
+    adapter: Arc<dyn Adapter>,
+    opts: ChangesStreamOptions,
+) -> (mpsc::Receiver<ChangeEvent>, ChangesHandle) {
+    let (tx, rx) = mpsc::channel(64);
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+
+    tokio::spawn(async move {
+        let mut stream =
+            LiveChangesStream::new(adapter, None, ChangesStreamOptions { live: true, ..opts });
+
+        loop {
+            tokio::select! {
+                change = stream.next_change() => {
+                    match change {
+                        Some(event) => {
+                            if tx.send(event).await.is_err() {
+                                break; // Receiver dropped
+                            }
+                        }
+                        None => break, // Stream ended (limit reached)
+                    }
+                }
+                _ = cancel_clone.cancelled() => break,
+            }
+        }
+    });
+
+    (rx, ChangesHandle { cancel })
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +429,39 @@ mod tests {
 
         // Limit reached (3)
         assert!(stream.next_change().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn live_changes_via_channel() {
+        let db = Arc::new(MemoryAdapter::new("test"));
+        put_doc(db.as_ref(), "a", serde_json::json!({"v": 1})).await;
+
+        let (mut rx, handle) = live_changes(
+            db.clone(),
+            ChangesStreamOptions {
+                live: true,
+                poll_interval: Duration::from_millis(50),
+                ..Default::default()
+            },
+        );
+
+        // Should receive the existing doc
+        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.id, "a");
+
+        // Add a new doc — should be picked up by polling
+        put_doc(db.as_ref(), "b", serde_json::json!({"v": 2})).await;
+
+        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.id, "b");
+
+        handle.cancel();
     }
 
     #[tokio::test]

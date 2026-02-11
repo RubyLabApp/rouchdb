@@ -46,6 +46,7 @@ let opts = ChangesOptions {
     include_docs: true,                           // embed full document bodies
     live: false,                                  // one-shot mode
     doc_ids: Some(vec!["user:alice".into()]),     // only these document IDs
+    selector: None,                               // Mango selector filter
 };
 ```
 
@@ -57,6 +58,7 @@ let opts = ChangesOptions {
 | `include_docs` | `bool` | Include the full document body in each event. |
 | `live` | `bool` | Used internally by the adapter; for live streaming, use `LiveChangesStream`. |
 | `doc_ids` | `Option<Vec<String>>` | Filter changes to only these document IDs. |
+| `selector` | `Option<serde_json::Value>` | Mango selector — only changes matching this selector are returned. |
 
 ### ChangesResponse and ChangeEvent
 
@@ -214,6 +216,32 @@ sender.notify(Seq::Num(42), "user:alice".into());
 
 When integrating with a custom adapter, call `sender.notify()` after every successful write so that all `LiveChangesStream` instances wake up immediately instead of waiting for the poll interval.
 
+## Database::live_changes()
+
+The `Database` struct provides a high-level `live_changes()` method that returns an `mpsc::Receiver<ChangeEvent>` and a `ChangesHandle`. This is the recommended way to consume live changes:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions};
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+// Receive events from the channel
+while let Some(event) = rx.recv().await {
+    println!("Change: {} seq={}", event.id, event.seq);
+}
+
+// Cancel the stream when done
+handle.cancel();
+```
+
+Dropping the `ChangesHandle` also cancels the stream automatically.
+
 ## Filtering by Document IDs
 
 Both one-shot and live changes support filtering:
@@ -229,3 +257,49 @@ let response = db.changes(ChangesOptions {
 ```
 
 This is useful for building reactive views that only care about a subset of documents.
+
+## Filtering by Mango Selector
+
+You can filter changes using a Mango selector — only changes to documents matching the selector are returned:
+
+```rust
+use rouchdb::{Database, ChangesOptions};
+
+let db = Database::memory("mydb");
+
+// One-shot: only changes for documents where type == "user"
+let changes = db.changes(ChangesOptions {
+    selector: Some(serde_json::json!({"type": "user"})),
+    include_docs: true,
+    ..Default::default()
+}).await?;
+
+for event in &changes.results {
+    println!("{}: {:?}", event.id, event.doc);
+}
+```
+
+For live changes with selector filtering:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions};
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+    selector: Some(serde_json::json!({"type": "user"})),
+    include_docs: true,
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+while let Some(event) = rx.recv().await {
+    // Only user documents arrive here
+    println!("User changed: {}", event.id);
+}
+
+handle.cancel();
+```
+
+When using the HTTP adapter (CouchDB), the selector is passed natively via `filter=_selector` for server-side filtering. For local adapters (memory, redb), documents are fetched with `include_docs: true` internally and filtered in Rust.

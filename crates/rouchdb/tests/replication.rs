@@ -3,9 +3,7 @@
 mod common;
 
 use common::{delete_remote_db, fresh_remote_db};
-use rouchdb::{
-    ChangesOptions, Database, ReplicationEvent, ReplicationFilter, ReplicationOptions,
-};
+use rouchdb::{ChangesOptions, Database, ReplicationEvent, ReplicationFilter, ReplicationOptions};
 
 // =========================================================================
 // Basic replication (local ↔ remote)
@@ -1093,7 +1091,10 @@ async fn live_replicate_picks_up_new_docs() {
 
     handle.cancel();
 
-    assert!(replicated, "late_doc was not replicated by live replication");
+    assert!(
+        replicated,
+        "late_doc was not replicated by live replication"
+    );
     let doc = remote.get("late_doc").await.unwrap();
     assert_eq!(doc.data["arrived"], "late");
 

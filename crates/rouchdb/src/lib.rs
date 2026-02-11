@@ -48,7 +48,10 @@ pub use rouchdb_adapter_memory::MemoryAdapter;
 pub use rouchdb_adapter_redb::RedbAdapter;
 
 // Re-export subsystems
-pub use rouchdb_changes::{ChangeReceiver, ChangeSender, LiveChangesStream};
+pub use rouchdb_changes::{
+    ChangeReceiver, ChangeSender, ChangesHandle, ChangesStreamOptions, LiveChangesStream,
+    live_changes,
+};
 pub use rouchdb_query::{
     BuiltIndex, CreateIndexResponse, FindOptions, FindResponse, IndexDefinition, IndexFields,
     IndexInfo, ReduceFn, SortField, ViewQueryOptions, ViewResult, build_index, find,
@@ -203,8 +206,80 @@ impl Database {
     }
 
     /// Get changes since a sequence number.
+    ///
+    /// If `opts.selector` is set, changes are fetched with `include_docs: true`
+    /// internally and filtered by the Mango selector. Only matching changes are
+    /// returned.
     pub async fn changes(&self, opts: ChangesOptions) -> Result<ChangesResponse> {
-        self.adapter.changes(opts).await
+        if let Some(ref selector) = opts.selector {
+            let selector = selector.clone();
+            let user_wants_docs = opts.include_docs;
+            let mut fetch_opts = opts;
+            fetch_opts.include_docs = true;
+            fetch_opts.selector = None; // Don't pass to adapter
+            let mut response = self.adapter.changes(fetch_opts).await?;
+            response.results.retain(|event| {
+                event
+                    .doc
+                    .as_ref()
+                    .is_some_and(|d| matches_selector(d, &selector))
+            });
+            if !user_wants_docs {
+                for event in &mut response.results {
+                    event.doc = None;
+                }
+            }
+            Ok(response)
+        } else {
+            self.adapter.changes(opts).await
+        }
+    }
+
+    /// Start a live (continuous) changes feed.
+    ///
+    /// Returns a receiver for `ChangeEvent` and a `ChangesHandle` that can be
+    /// used to cancel the stream. Dropping the handle also cancels it.
+    ///
+    /// If `opts.selector` is set, events are post-filtered using the Mango
+    /// selector — only matching changes are forwarded through the channel.
+    pub fn live_changes(
+        &self,
+        opts: ChangesStreamOptions,
+    ) -> (tokio::sync::mpsc::Receiver<ChangeEvent>, ChangesHandle) {
+        if opts.selector.is_some() {
+            let selector = opts.selector.clone().unwrap();
+            let user_wants_docs = opts.include_docs;
+            let inner_opts = ChangesStreamOptions {
+                include_docs: true, // Need docs for selector evaluation
+                selector: None,
+                ..opts
+            };
+            let (inner_rx, handle) = live_changes(self.adapter.clone(), inner_opts);
+            let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+            tokio::spawn(async move {
+                let mut inner_rx = inner_rx;
+                while let Some(mut event) = inner_rx.recv().await {
+                    let matches = event
+                        .doc
+                        .as_ref()
+                        .is_some_and(|d| matches_selector(d, &selector));
+                    if !matches {
+                        continue;
+                    }
+                    if !user_wants_docs {
+                        event.doc = None;
+                    }
+                    if tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            (rx, handle)
+        } else {
+            live_changes(self.adapter.clone(), opts)
+        }
     }
 
     // -----------------------------------------------------------------
@@ -905,6 +980,132 @@ mod tests {
 
         handle.cancel();
         assert!(got_complete || remote.get("doc1").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn database_changes_with_selector() {
+        let db = Database::memory("test");
+        db.put("alice", serde_json::json!({"type": "user", "age": 30}))
+            .await
+            .unwrap();
+        db.put(
+            "inv1",
+            serde_json::json!({"type": "invoice", "amount": 100}),
+        )
+        .await
+        .unwrap();
+        db.put("bob", serde_json::json!({"type": "user", "age": 25}))
+            .await
+            .unwrap();
+
+        let changes = db
+            .changes(ChangesOptions {
+                selector: Some(serde_json::json!({"type": "user"})),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(changes.results.len(), 2);
+        assert!(
+            changes
+                .results
+                .iter()
+                .all(|c| c.id == "alice" || c.id == "bob")
+        );
+        // Docs should NOT be included (user didn't ask for them)
+        assert!(changes.results[0].doc.is_none());
+    }
+
+    #[tokio::test]
+    async fn database_changes_with_selector_and_include_docs() {
+        let db = Database::memory("test");
+        db.put("a", serde_json::json!({"score": 10})).await.unwrap();
+        db.put("b", serde_json::json!({"score": 50})).await.unwrap();
+        db.put("c", serde_json::json!({"score": 90})).await.unwrap();
+
+        let changes = db
+            .changes(ChangesOptions {
+                selector: Some(serde_json::json!({"score": {"$gte": 50}})),
+                include_docs: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(changes.results.len(), 2);
+        assert!(changes.results[0].doc.is_some());
+    }
+
+    #[tokio::test]
+    async fn database_live_changes_basic() {
+        let db = Database::memory("test");
+        db.put("a", serde_json::json!({"v": 1})).await.unwrap();
+
+        let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+            poll_interval: std::time::Duration::from_millis(50),
+            ..Default::default()
+        });
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.id, "a");
+
+        // Add another doc — picked up by polling
+        db.put("b", serde_json::json!({"v": 2})).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.id, "b");
+
+        handle.cancel();
+    }
+
+    #[tokio::test]
+    async fn database_live_changes_with_selector() {
+        let db = Database::memory("test");
+        db.put(
+            "alice",
+            serde_json::json!({"type": "user", "name": "Alice"}),
+        )
+        .await
+        .unwrap();
+        db.put(
+            "inv1",
+            serde_json::json!({"type": "invoice", "amount": 100}),
+        )
+        .await
+        .unwrap();
+        db.put("bob", serde_json::json!({"type": "user", "name": "Bob"}))
+            .await
+            .unwrap();
+
+        let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+            selector: Some(serde_json::json!({"type": "user"})),
+            poll_interval: std::time::Duration::from_millis(50),
+            ..Default::default()
+        });
+
+        // Should only receive user docs (alice, bob), not invoice
+        let e1 = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(e1.id == "alice" || e1.id == "bob");
+        assert!(e1.doc.is_none()); // user didn't request include_docs
+
+        let e2 = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(e2.id == "alice" || e2.id == "bob");
+        assert_ne!(e1.id, e2.id);
+
+        handle.cancel();
     }
 
     #[tokio::test]
