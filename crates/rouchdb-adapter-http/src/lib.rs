@@ -3,6 +3,8 @@
 /// Communicates with a remote CouchDB-compatible server via HTTP,
 /// implementing the Adapter trait by mapping each method to the
 /// corresponding CouchDB REST API endpoint.
+pub mod auth;
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -163,6 +165,14 @@ impl HttpAdapter {
         Self { client, base_url }
     }
 
+    /// Create a new HTTP adapter using an authenticated client.
+    ///
+    /// The `AuthClient` must have been logged in already; its internal
+    /// reqwest client (with cookie store) will be shared with this adapter.
+    pub fn with_auth_client(url: &str, auth: &auth::AuthClient) -> Self {
+        Self::with_client(url, auth.client().clone())
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}/{}", self.base_url, path.trim_start_matches('/'))
     }
@@ -251,6 +261,15 @@ impl Adapter for HttpAdapter {
         if opts.revs {
             params.push("revs=true".into());
         }
+        if opts.revs_info {
+            params.push("revs_info=true".into());
+        }
+        if opts.latest {
+            params.push("latest=true".into());
+        }
+        if opts.attachments {
+            params.push("attachments=true".into());
+        }
         if let Some(ref open_revs) = opts.open_revs {
             match open_revs {
                 OpenRevs::All => params.push("open_revs=all".into()),
@@ -338,6 +357,12 @@ impl Adapter for HttpAdapter {
         if opts.skip > 0 {
             params.push(format!("skip={}", opts.skip));
         }
+        if opts.conflicts {
+            params.push("conflicts=true".into());
+        }
+        if opts.update_seq {
+            params.push("update_seq=true".into());
+        }
 
         let mut url = self.url("_all_docs");
         if !params.is_empty() {
@@ -372,6 +397,7 @@ impl Adapter for HttpAdapter {
                     doc: r.doc,
                 })
                 .collect(),
+            update_seq: None, // TODO: parse from CouchDB response when update_seq=true
         })
     }
 
@@ -386,17 +412,32 @@ impl Adapter for HttpAdapter {
         if let Some(limit) = opts.limit {
             params.push(format!("limit={}", limit));
         }
-        if let Some(ref _doc_ids) = opts.doc_ids {
+
+        if opts.conflicts {
+            params.push("conflicts=true".into());
+        }
+        if opts.style == ChangesStyle::AllDocs {
+            params.push("style=all_docs".into());
+        }
+
+        // Determine which filter to use — doc_ids and selector are mutually exclusive
+        let use_post = opts.doc_ids.is_some() || opts.selector.is_some();
+        if opts.doc_ids.is_some() {
             params.push("filter=_doc_ids".into());
-            // doc_ids need to be sent as POST body for _changes
+        } else if opts.selector.is_some() {
+            params.push("filter=_selector".into());
         }
 
         let url = format!("{}?{}", self.url("_changes"), params.join("&"));
 
-        let resp = if let Some(doc_ids) = opts.doc_ids {
-            let body = serde_json::json!({
-                "doc_ids": doc_ids
-            });
+        let resp = if use_post {
+            let body = if let Some(doc_ids) = opts.doc_ids {
+                serde_json::json!({ "doc_ids": doc_ids })
+            } else if let Some(selector) = opts.selector {
+                serde_json::json!({ "selector": selector })
+            } else {
+                serde_json::json!({})
+            };
             self.client
                 .post(&url)
                 .json(&body)
@@ -432,6 +473,7 @@ impl Adapter for HttpAdapter {
                         .collect(),
                     deleted: r.deleted,
                     doc: r.doc,
+                    conflicts: None, // CouchDB includes these inline in the doc
                 })
                 .collect(),
         })
@@ -568,6 +610,35 @@ impl Adapter for HttpAdapter {
         Ok(bytes.to_vec())
     }
 
+    async fn remove_attachment(&self, doc_id: &str, att_id: &str, rev: &str) -> Result<DocResult> {
+        let url = format!(
+            "{}/{}?rev={}",
+            self.url(&urlencoded(doc_id)),
+            urlencoded(att_id),
+            rev
+        );
+
+        let resp = self
+            .client
+            .delete(&url)
+            .send()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        let resp = self.check_error(resp).await?;
+        let result: CouchDbPutResponse = resp
+            .json()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+
+        Ok(DocResult {
+            ok: result.ok.unwrap_or(true),
+            id: result.id,
+            rev: Some(result.rev),
+            error: None,
+            reason: None,
+        })
+    }
+
     async fn get_local(&self, id: &str) -> Result<serde_json::Value> {
         let url = self.url(&format!("_local/{}", urlencoded(id)));
         let resp = self
@@ -638,15 +709,62 @@ impl Adapter for HttpAdapter {
         self.check_error(resp).await?;
         Ok(())
     }
+
+    async fn purge(&self, req: HashMap<String, Vec<String>>) -> Result<PurgeResponse> {
+        let resp = self
+            .client
+            .post(self.url("_purge"))
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        let resp = self.check_error(resp).await?;
+        let result: PurgeResponse = resp
+            .json()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        Ok(result)
+    }
+
+    async fn get_security(&self) -> Result<SecurityDocument> {
+        let resp = self
+            .client
+            .get(self.url("_security"))
+            .send()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        let resp = self.check_error(resp).await?;
+        let doc: SecurityDocument = resp
+            .json()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        Ok(doc)
+    }
+
+    async fn put_security(&self, doc: SecurityDocument) -> Result<()> {
+        let resp = self
+            .client
+            .put(self.url("_security"))
+            .json(&doc)
+            .send()
+            .await
+            .map_err(|e| RouchError::DatabaseError(e.to_string()))?;
+        self.check_error(resp).await?;
+        Ok(())
+    }
 }
 
-/// Simple percent-encoding for document IDs (handles special chars).
+/// Percent-encode a CouchDB document or attachment ID for safe URL use.
+///
+/// Encodes all characters except unreserved ones (alphanumeric, `-`, `_`, `.`, `~`).
+/// This ensures IDs containing `@`, `&`, `=`, `/`, `+`, spaces, etc. are handled correctly.
 fn urlencoded(s: &str) -> String {
-    // Encode characters that are special in URLs
-    s.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace('/', "%2F")
-        .replace('?', "%3F")
-        .replace('#', "%23")
-        .replace('+', "%2B")
+    /// Characters that do NOT need encoding in a path segment.
+    /// RFC 3986 unreserved: ALPHA / DIGIT / "-" / "." / "_" / "~"
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.')
+        .remove(b'~');
+    percent_encoding::percent_encode(s.as_bytes(), UNRESERVED).to_string()
 }

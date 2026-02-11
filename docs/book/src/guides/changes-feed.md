@@ -46,6 +46,7 @@ let opts = ChangesOptions {
     include_docs: true,                           // embed full document bodies
     live: false,                                  // one-shot mode
     doc_ids: Some(vec!["user:alice".into()]),     // only these document IDs
+    selector: None,                               // Mango selector filter
 };
 ```
 
@@ -57,6 +58,7 @@ let opts = ChangesOptions {
 | `include_docs` | `bool` | Include the full document body in each event. |
 | `live` | `bool` | Used internally by the adapter; for live streaming, use `LiveChangesStream`. |
 | `doc_ids` | `Option<Vec<String>>` | Filter changes to only these document IDs. |
+| `selector` | `Option<serde_json::Value>` | Mango selector — only changes matching this selector are returned. |
 
 ### ChangesResponse and ChangeEvent
 
@@ -214,6 +216,110 @@ sender.notify(Seq::Num(42), "user:alice".into());
 
 When integrating with a custom adapter, call `sender.notify()` after every successful write so that all `LiveChangesStream` instances wake up immediately instead of waiting for the poll interval.
 
+## Custom Filter Closures
+
+For flexible client-side filtering, pass a `ChangesFilter` closure that receives each `ChangeEvent` and returns `true` to include or `false` to skip:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions, ChangesFilter};
+use std::sync::Arc;
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let filter: ChangesFilter = Arc::new(|event| {
+    event.id.starts_with("user:")
+});
+
+let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+    filter: Some(filter),
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+while let Some(event) = rx.recv().await {
+    // Only user: docs arrive here
+    println!("User changed: {}", event.id);
+}
+
+handle.cancel();
+```
+
+## Database::live_changes()
+
+The `Database` struct provides a high-level `live_changes()` method that returns an `mpsc::Receiver<ChangeEvent>` and a `ChangesHandle`. This is the recommended way to consume live changes:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions};
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+// Receive events from the channel
+while let Some(event) = rx.recv().await {
+    println!("Change: {} seq={}", event.id, event.seq);
+}
+
+// Cancel the stream when done
+handle.cancel();
+```
+
+Dropping the `ChangesHandle` also cancels the stream automatically.
+
+## Database::live_changes_events()
+
+For applications that need lifecycle events (active, paused, errors) in addition to document changes, use `live_changes_events()`. It returns `ChangesEvent` enum variants instead of raw `ChangeEvent` structs:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions, ChangesEvent};
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let (mut rx, handle) = db.live_changes_events(ChangesStreamOptions {
+    include_docs: true,
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+while let Some(event) = rx.recv().await {
+    match event {
+        ChangesEvent::Change(ce) => {
+            println!("Doc changed: {} seq={}", ce.id, ce.seq);
+        }
+        ChangesEvent::Complete { last_seq } => {
+            println!("Caught up at seq {}", last_seq);
+        }
+        ChangesEvent::Error(msg) => {
+            eprintln!("Error: {}", msg);
+        }
+        ChangesEvent::Paused => {
+            println!("Waiting for new changes...");
+        }
+        ChangesEvent::Active => {
+            println!("Processing changes...");
+        }
+    }
+}
+
+handle.cancel();
+```
+
+### ChangesEvent Variants
+
+| Variant | Description |
+|---------|-------------|
+| `Change(ChangeEvent)` | A document was created, updated, or deleted. |
+| `Complete { last_seq: Seq }` | All current changes have been processed. |
+| `Error(String)` | An error occurred while fetching changes. |
+| `Paused` | Waiting for new changes (no pending changes). |
+| `Active` | Resumed processing after a pause. |
+
 ## Filtering by Document IDs
 
 Both one-shot and live changes support filtering:
@@ -229,3 +335,49 @@ let response = db.changes(ChangesOptions {
 ```
 
 This is useful for building reactive views that only care about a subset of documents.
+
+## Filtering by Mango Selector
+
+You can filter changes using a Mango selector — only changes to documents matching the selector are returned:
+
+```rust
+use rouchdb::{Database, ChangesOptions};
+
+let db = Database::memory("mydb");
+
+// One-shot: only changes for documents where type == "user"
+let changes = db.changes(ChangesOptions {
+    selector: Some(serde_json::json!({"type": "user"})),
+    include_docs: true,
+    ..Default::default()
+}).await?;
+
+for event in &changes.results {
+    println!("{}: {:?}", event.id, event.doc);
+}
+```
+
+For live changes with selector filtering:
+
+```rust
+use rouchdb::{Database, ChangesStreamOptions};
+use std::time::Duration;
+
+let db = Database::memory("mydb");
+
+let (mut rx, handle) = db.live_changes(ChangesStreamOptions {
+    selector: Some(serde_json::json!({"type": "user"})),
+    include_docs: true,
+    poll_interval: Duration::from_millis(200),
+    ..Default::default()
+});
+
+while let Some(event) = rx.recv().await {
+    // Only user documents arrive here
+    println!("User changed: {}", event.id);
+}
+
+handle.cancel();
+```
+
+When using the HTTP adapter (CouchDB), the selector is passed natively via `filter=_selector` for server-side filtering. For local adapters (memory, redb), documents are fetched with `include_docs: true` internally and filtered in Rust.

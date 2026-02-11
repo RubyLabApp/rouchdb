@@ -67,6 +67,12 @@ let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
 | `batch_size` | `u64` | `100` | Numero de cambios a procesar por iteracion |
 | `batches_limit` | `u64` | `10` | Maximo numero de lotes a buffear |
 | `filter` | `Option<ReplicationFilter>` | `None` | Filtro opcional para replicacion selectiva |
+| `since` | `Option<Seq>` | `None` | Secuencia inicial (en vez de leer checkpoint) |
+| `checkpoint` | `bool` | `true` | Deshabilitar con `false` para no guardar/leer checkpoints |
+| `live` | `bool` | `false` | Habilitar replicacion continua |
+| `retry` | `bool` | `false` | Reintentar automaticamente en caso de error |
+| `poll_interval` | `Duration` | `500ms` | Intervalo de sondeo en modo continuo |
+| `back_off_function` | `Option<Box<dyn Fn(u32) -> Duration + Send + Sync>>` | `None` | Funcion de backoff para reintentos |
 
 ## Replicacion filtrada
 
@@ -89,7 +95,7 @@ let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
 
 // Por closure personalizado
 let result = local.replicate_to_with_opts(&remote, ReplicationOptions {
-    filter: Some(ReplicationFilter::Custom(Box::new(|change| {
+    filter: Some(ReplicationFilter::Custom(std::sync::Arc::new(|change| {
         change.id.starts_with("public:")
     }))),
     ..Default::default()
@@ -162,6 +168,70 @@ async fn main() -> rouchdb::Result<()> {
     Ok(())
 }
 ```
+
+## Replicacion con eventos
+
+Usa `replicate_to_with_events()` para recibir eventos de progreso durante la replicacion:
+
+```rust
+use rouchdb::ReplicationEvent;
+
+let (result, mut rx) = local.replicate_to_with_events(
+    &remote,
+    ReplicationOptions::default(),
+).await?;
+
+while let Ok(event) = rx.try_recv() {
+    match event {
+        ReplicationEvent::Active => println!("Replicacion iniciada"),
+        ReplicationEvent::Change { docs_read } => {
+            println!("Progreso: {} docs leidos", docs_read);
+        }
+        ReplicationEvent::Complete(r) => {
+            println!("Completado: {} escritos", r.docs_written);
+        }
+        ReplicationEvent::Error(msg) => println!("Error: {}", msg),
+        ReplicationEvent::Paused => println!("Esperando cambios..."),
+    }
+}
+```
+
+## Replicacion continua (live)
+
+La replicacion continua se ejecuta en segundo plano, sondeando periodicamente por nuevos cambios. Equivalente a `{ live: true }` en PouchDB.
+
+```rust
+use rouchdb::{ReplicationOptions, ReplicationEvent};
+
+let (mut rx, handle) = local.replicate_to_live(&remote, ReplicationOptions {
+    live: true,
+    poll_interval: std::time::Duration::from_millis(500),
+    retry: true,
+    ..Default::default()
+});
+
+// Procesar eventos en un loop
+tokio::spawn(async move {
+    while let Some(event) = rx.recv().await {
+        match event {
+            ReplicationEvent::Complete(r) => {
+                println!("Lote completado: {} docs escritos", r.docs_written);
+            }
+            ReplicationEvent::Paused => {
+                println!("Actualizado, esperando nuevos cambios...");
+            }
+            _ => {}
+        }
+    }
+});
+
+// Cancelar cuando sea necesario
+handle.cancel();
+```
+
+El `ReplicationHandle` controla la replicacion:
+- `handle.cancel()` detiene la replicacion.
+- Si se descarta el handle (Drop), la replicacion tambien se cancela.
 
 ## Manejo de errores
 
