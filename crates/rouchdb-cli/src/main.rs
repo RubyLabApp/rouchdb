@@ -461,9 +461,10 @@ async fn run(cli: Cli) -> rouchdb::Result<()> {
             let effective_rev = if rev.is_some() {
                 rev
             } else if force {
-                db.get(&doc_id).await.ok().and_then(|doc| {
-                    doc.rev.map(|r| r.to_string())
-                })
+                db.get(&doc_id)
+                    .await
+                    .ok()
+                    .and_then(|doc| doc.rev.map(|r| r.to_string()))
             } else {
                 None
             };
@@ -535,10 +536,9 @@ async fn run(cli: Cli) -> rouchdb::Result<()> {
             let content = std::fs::read_to_string(&file).map_err(|e| {
                 rouchdb::RouchError::BadRequest(format!("cannot read file '{}': {}", file, e))
             })?;
-            let docs: Vec<serde_json::Value> =
-                serde_json::from_str(&content).map_err(|e| {
-                    rouchdb::RouchError::BadRequest(format!("invalid JSON in '{}': {}", file, e))
-                })?;
+            let docs: Vec<serde_json::Value> = serde_json::from_str(&content).map_err(|e| {
+                rouchdb::RouchError::BadRequest(format!("invalid JSON in '{}': {}", file, e))
+            })?;
 
             let mut imported = 0u64;
             let mut errors = Vec::new();

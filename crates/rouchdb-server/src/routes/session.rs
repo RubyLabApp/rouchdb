@@ -18,7 +18,10 @@ pub async fn delete_session() -> Response {
     let body = serde_json::json!({"ok": true});
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, "AuthSession=; Version=1; Path=/; HttpOnly; Max-Age=0")],
+        [(
+            header::SET_COOKIE,
+            "AuthSession=; Version=1; Path=/; HttpOnly; Max-Age=0",
+        )],
         Json(body),
     )
         .into_response()
